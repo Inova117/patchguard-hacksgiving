@@ -157,3 +157,40 @@ test('4. Zero-Secret audit finds zero leaked raw tokens in process env', () => {
   assert.equal(audit.secretFilesFound.length, 0);
   assert.equal(audit.zeroSecretsVerified, true);
 });
+
+test('5. State hydration restores beforeReport and Before PNGs after CoW rollback', async () => {
+  const hydraRunId = `hydrate-test-${Date.now()}`;
+  const tinyPngB64 =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+  const fakeReport = {
+    runId: hydraRunId,
+    phase: 'before',
+    passedCount: 1,
+    failedCount: 5,
+    totalChecks: 6,
+    revenueLeakCents: 129899,
+    checks: [
+      { id: 'CHECK-01', title: 'Test', passed: false, screenshotUrl: `/artifacts/runs/${hydraRunId}/before/check01-price.png`, evidence: 'hydrated' },
+    ],
+  };
+
+  const res = await postJson('/api/state/hydrate-before', {
+    runId: hydraRunId,
+    beforeReport: fakeReport,
+    restoreMs: 1120,
+    screenshots: { 'check01-price.png': tinyPngB64 },
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.data.ok, true);
+  assert.equal(res.data.restoredFiles, 1);
+
+  const stateRes = await getJson('/api/state');
+  assert.equal(stateRes.status, 200);
+  assert.equal(stateRes.data.latestRunId, hydraRunId);
+  assert.equal(stateRes.data.beforeReport.revenueLeakCents, 129899);
+  assert.equal(stateRes.data.lastRestoreResult.durationMs, 1120);
+
+  const imgRes = await fetch(`${BASE_URL}/artifacts/runs/${hydraRunId}/before/check01-price.png`);
+  assert.equal(imgRes.status, 200);
+  assert.equal((await imgRes.arrayBuffer()).byteLength, Buffer.from(tinyPngB64, 'base64').byteLength);
+});

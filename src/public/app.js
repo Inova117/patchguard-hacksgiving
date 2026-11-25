@@ -241,6 +241,39 @@ async function refreshState() {
   return data;
 }
 
+async function captureBeforeScreenshots(beforeReport) {
+  const screenshots = {};
+  const checks = beforeReport?.checks || [];
+  await Promise.all(
+    checks.map(async (c) => {
+      if (!c.screenshotUrl) return;
+      try {
+        const res = await fetch(`${c.screenshotUrl}?t=${Date.now()}`, { cache: 'no-store' });
+        if (!res.ok) return;
+        const blob = await res.blob();
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(String(reader.result || ''));
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+        const filename = c.screenshotUrl.split('/').pop();
+        if (filename && dataUrl) {
+          screenshots[filename] = dataUrl.replace(/^data:image\/png;base64,/, '');
+        }
+      } catch {}
+    })
+  );
+  return screenshots;
+}
+
+async function hydrateBeforeState(runId, beforeReport, restoreMs, screenshots) {
+  await api('/api/state/hydrate-before', {
+    method: 'POST',
+    body: JSON.stringify({ runId, beforeReport, restoreMs, screenshots }),
+  });
+}
+
 async function waitForSpriteReconnect(startedAtMs) {
   const metricEl = document.getElementById('restoreMetric');
   while (true) {
@@ -315,6 +348,8 @@ async function runFullAutonomousLoop() {
     setStep(2, 'done', `${beforeRes.report.passedCount}/6 (${beforeRes.report.durationMs}ms)`);
     await refreshState();
 
+    const screenshotsBase64 = await captureBeforeScreenshots(beforeRes.report);
+
     setStep(3, 'active', 'Restoring...');
     const tRestore = Date.now();
     const restoreRes = await api('/api/checkpoints/restore', {
@@ -323,9 +358,20 @@ async function runFullAutonomousLoop() {
     });
 
     if (restoreRes.restoring) {
-      sessionStorage.setItem('patchguard_resume', JSON.stringify({ runId, restoreStartedAt: tRestore }));
-      await waitForSpriteReconnect(tRestore);
+      try {
+        sessionStorage.setItem(
+          'patchguard_resume',
+          JSON.stringify({
+            runId,
+            restoreStartedAt: tRestore,
+            beforeReport: beforeRes.report,
+            screenshots: screenshotsBase64,
+          })
+        );
+      } catch {}
+      const { totalMs } = await waitForSpriteReconnect(tRestore);
       sessionStorage.removeItem('patchguard_resume');
+      await hydrateBeforeState(runId, beforeRes.report, totalMs, screenshotsBase64);
     } else {
       setStep(3, 'done', `${restoreRes.durationMs} ms`);
       document.getElementById('restoreMetric').textContent = `${restoreRes.durationMs} ms`;
@@ -442,8 +488,12 @@ evSource.onmessage = (ev) => {
   const resumeRaw = sessionStorage.getItem('patchguard_resume');
   if (resumeRaw) {
     sessionStorage.removeItem('patchguard_resume');
-    const { runId, restoreStartedAt } = JSON.parse(resumeRaw);
-    setStep(3, 'done', `${Date.now() - restoreStartedAt} ms (CoW)`);
+    const { runId, restoreStartedAt, beforeReport, screenshots } = JSON.parse(resumeRaw);
+    const totalMs = Date.now() - restoreStartedAt;
+    setStep(3, 'done', `${totalMs} ms (CoW)`);
+    if (beforeReport) {
+      await hydrateBeforeState(runId, beforeReport, totalMs, screenshots || {});
+    }
     await finishPostRestorePipeline(runId);
   }
 })();

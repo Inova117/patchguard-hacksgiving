@@ -35,7 +35,7 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '5mb' }));
 
 const sseClients = new Set();
 let storeProc = null;
@@ -464,6 +464,48 @@ app.post('/api/repo/audit', async (req, res) => {
   } catch (err) {
     emitLog('error', `Repo audit failed: ${err.message}`);
     res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/state/hydrate-before', (req, res) => {
+  try {
+    const { runId, beforeReport, restoreMs, screenshots } = req.body || {};
+    if (!runId || !/^[\w-]+$/.test(String(runId))) {
+      return res.status(400).json({ ok: false, error: 'Invalid runId' });
+    }
+    if (!beforeReport || typeof beforeReport !== 'object') {
+      return res.status(400).json({ ok: false, error: 'Missing beforeReport' });
+    }
+
+    const beforeDir = path.join(ARTIFACTS_DIR, 'runs', String(runId), 'before');
+    fs.mkdirSync(beforeDir, { recursive: true });
+
+    let restoredFiles = 0;
+    if (screenshots && typeof screenshots === 'object') {
+      for (const [filename, b64] of Object.entries(screenshots)) {
+        if (!/^[\w.-]+\.png$/.test(filename) || typeof b64 !== 'string') continue;
+        const cleanB64 = b64.replace(/^data:image\/png;base64,/, '');
+        fs.writeFileSync(path.join(beforeDir, filename), Buffer.from(cleanB64, 'base64'));
+        restoredFiles += 1;
+      }
+    }
+
+    state.latestRunId = String(runId);
+    state.beforeReport = beforeReport;
+    state.lastRestoreResult = {
+      restored: true,
+      mode: 'fly-sprite-cow',
+      durationMs: Number.isFinite(Number(restoreMs)) ? Number(restoreMs) : state.lastRestoreResult?.durationMs ?? null,
+    };
+
+    emitLog(
+      'success',
+      `Hydrated pre-restore Before QA state (${runId}, ${restoredFiles} PNGs, restore=${state.lastRestoreResult.durationMs ?? '—'}ms)`
+    );
+    return res.json({ ok: true, restoredFiles });
+  } catch (err) {
+    emitLog('error', `State hydrate failed: ${err.message}`);
+    return res.status(500).json({ ok: false, error: err.message });
   }
 });
 
