@@ -1,0 +1,25 @@
+{
+  "name": "patchguard",
+  "version": "1.0.0",
+  "description": "Autonomous live-browser defensive security QA and self-healing agent running on Fly.io Sprites with Checkpoints and Zero-Secret Connectors.",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node --no-warnings src/server.js",
+    "store": "node --no-warnings target-store/server.js",
+    "test": "node --no-warnings --test test/e2e.test.js"
+  },
+  "keywords": [
+    "flyio",
+    "sprites",
+    "hacksgiving",
+    "playwright",
+    "devsecops",
+    "ai-agent"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.2",
+    "playwright": "^1.52.0"
+  }
+}

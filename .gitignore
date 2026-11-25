@@ -1,0 +1,8 @@
+node_modules/
+artifacts/
+target-store/data/*.db*
+target-store/.clean-snapshot/
+target-store/.patched-backup/
+.env
+.sprite
+*.log

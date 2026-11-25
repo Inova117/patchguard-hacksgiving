@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PatchGuard — Autonomous Browser Security QA &amp; Self-Healing Agent</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand-wrap">
+        <div class="logo-mark">PG</div>
+        <div>
+          <div class="brand-title">PatchGuard <span class="ver">Hacksgiving 2026</span></div>
+          <div class="brand-sub">Live Chromium QA · Fly Sprite CoW Checkpoints · Zero-Secret Connectors</div>
+        </div>
+      </div>
+
+      <div class="status-pills">
+        <span class="pill" id="runtimePill">Runtime: detecting...</span>
+        <span class="pill" id="dbPill">DB SHA-256: —</span>
+        <span class="pill" id="secretsPill">Secrets: checking...</span>
+      </div>
+
+      <div class="actions">
+        <button class="btn primary" id="runLoopBtn">▶ Run Autonomous Self-Heal Loop</button>
+        <button class="btn" id="resetBtn">↺ Reset Vulnerable Demo</button>
+      </div>
+    </header>
+
+    <section class="pipeline" id="pipelineBar">
+      <div class="step" data-step="1"><span class="step-num">1</span><div><div class="step-name">CoW Checkpoint</div><div class="step-meta" id="step1Meta">Idle</div></div></div>
+      <div class="step" data-step="2"><span class="step-num">2</span><div><div class="step-name">Chromium QA (Before)</div><div class="step-meta" id="step2Meta">Idle</div></div></div>
+      <div class="step" data-step="3"><span class="step-num">3</span><div><div class="step-name">Sprite CoW Restore</div><div class="step-meta" id="step3Meta">Idle</div></div></div>
+      <div class="step" data-step="4"><span class="step-num">4</span><div><div class="step-name">Zero-Secret AI Patch</div><div class="step-meta" id="step4Meta">Idle</div></div></div>
+      <div class="step" data-step="5"><span class="step-num">5</span><div><div class="step-name">Chromium Re-Verify</div><div class="step-meta" id="step5Meta">Idle</div></div></div>
+      <div class="step" data-step="6"><span class="step-num">6</span><div><div class="step-name">Verified GitHub PR</div><div class="step-meta" id="step6Meta">Idle</div></div></div>
+    </section>
+
+    <div class="metrics-row">
+      <div class="metric-card">
+        <div class="metric-label">QA Pass Rate (Before → After)</div>
+        <div class="metric-val" id="passMetric">— / 6</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Revenue Leak Prevented</div>
+        <div class="metric-val leak" id="leakMetric">$0.00</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Filesystem CoW Restore</div>
+        <div class="metric-val" id="restoreMetric">— ms</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Raw Credentials in Sprite</div>
+        <div class="metric-val ok" id="secretCountMetric">0</div>
+      </div>
+    </div>
+
+    <main class="main-grid">
+      <section class="card">
+        <div class="card-head">
+          <h2>6-Check Browser QA Assertions</h2>
+          <div class="inline-btns">
+            <button class="btn sm" id="runBeforeBtn">Run Before QA</button>
+            <button class="btn sm" id="runAfterBtn">Run After QA</button>
+          </div>
+        </div>
+        <div class="checks-list" id="checksList"></div>
+
+        <h3 class="sub-head">Real Headless Chromium Evidence (Before vs After)</h3>
+        <div class="shots-grid" id="shotsGrid"></div>
+      </section>
+
+      <section class="card">
+        <div class="tabs" id="tabsBar">
+          <button class="tab active" data-tab="diff">Code Diff</button>
+          <button class="tab" data-tab="checkpoints">Sprite Checkpoints</button>
+          <button class="tab" data-tab="vault">Zero-Secret Vault</button>
+          <button class="tab" data-tab="store">Live Storefront</button>
+          <button class="tab" data-tab="logs">Live SSE Log</button>
+          <button class="tab" data-tab="repo">Custom Repo Audit</button>
+        </div>
+
+        <div class="tab-panel active" id="tab-diff">
+          <div class="panel-actions">
+            <span class="muted" id="patchMeta">Run the self-heal loop or apply patch to view diff.</span>
+            <button class="btn sm" id="applyPatchBtn">Apply Patch Only</button>
+          </div>
+          <pre class="diff-view" id="diffView">No patch generated yet.</pre>
+        </div>
+
+        <div class="tab-panel" id="tab-checkpoints">
+          <div class="panel-actions">
+            <button class="btn sm primary" id="createCpBtn">+ Create Checkpoint</button>
+            <button class="btn sm" id="restoreCpBtn">Restore Baseline</button>
+            <button class="btn sm" id="diffCpBtn">Diff Live vs Checkpoint</button>
+          </div>
+          <div id="checkpointsList" class="cp-list"></div>
+          <pre class="diff-view" id="cpDiffView" style="margin-top:10px;max-height:220px;">Select "Diff Live vs Checkpoint" to inspect filesystem changes.</pre>
+        </div>
+
+        <div class="tab-panel" id="tab-vault">
+          <div class="panel-actions">
+            <button class="btn sm primary" id="testGuardrailsBtn">Run Live 403 Guardrail Proof</button>
+            <button class="btn sm" id="openPrBtn">Open Verified GitHub PR</button>
+          </div>
+          <div id="vaultSummary" class="vault-box"></div>
+          <div id="prBox" class="vault-box" style="margin-top:10px;"></div>
+        </div>
+
+        <div class="tab-panel" id="tab-store">
+          <div class="panel-actions">
+            <span class="muted">Live PixelMart running on <code>127.0.0.1:4100</code> proxied via <code>/pixelmart/</code></span>
+            <div>
+              <button class="btn sm" id="reloadStoreBtn">Reload Frame</button>
+              <a class="btn sm" href="/pixelmart/" target="_blank" rel="noopener">Open Tab ↗</a>
+            </div>
+          </div>
+          <iframe id="storeFrame" src="/pixelmart/" title="PixelMart Storefront"></iframe>
+        </div>
+
+        <div class="tab-panel" id="tab-logs">
+          <div class="terminal" id="sseTerminal"></div>
+        </div>
+
+        <div class="tab-panel" id="tab-repo">
+          <div class="panel-actions">
+            <input id="repoUrlInput" placeholder="https://github.com/owner/public-repo" style="flex:1;" />
+            <button class="btn sm primary" id="auditRepoBtn">Audit Public Repo</button>
+          </div>
+          <pre class="diff-view" id="repoAuditResult">Enter any public Node/JS GitHub URL to shallow-clone into an isolated /tmp sandbox inside the Sprite and audit static security hygiene.</pre>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal" id="shotModal">
+    <div class="modal-inner">
+      <div class="modal-head">
+        <strong id="modalTitle">Screenshot Comparison</strong>
+        <button class="btn sm" id="closeModalBtn">Close</button>
+      </div>
+      <div class="modal-imgs" id="modalImgs"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
