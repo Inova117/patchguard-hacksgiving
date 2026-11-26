@@ -288,7 +288,7 @@ ${vulnerableCode}
   const candidateModels = isOllama
     ? [process.env.PATCHGUARD_OLLAMA_MODEL || 'qwen2.5-coder:32b']
     : [
-        process.env.PATCHGUARD_OPENROUTER_MODEL || 'google/gemma-4-31b-it:free',
+        process.env.PATCHGUARD_OPENROUTER_MODEL || 'nvidia/nemotron-3.5-lightning:free',
         'openrouter/free',
       ];
 
@@ -309,7 +309,8 @@ ${vulnerableCode}
       : {
           model,
           temperature: 0.1,
-          max_tokens: 8000,
+          max_tokens: 6000,
+          reasoning: { effort: 'low' },
           messages: [{ role: 'user', content: prompt }],
         };
 
@@ -317,7 +318,7 @@ ${vulnerableCode}
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(55000),
+      signal: AbortSignal.timeout(20000),
     });
 
     if (!res.ok) {
