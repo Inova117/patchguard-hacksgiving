@@ -26,23 +26,23 @@ OR_RES="$(curl -sS -X POST "$API/v1/oauth/connections/provision" \
   -d '{"provider":"openrouter"}')"
 echo "$OR_RES"
 
-OR_ID="$(echo "$OR_RES" | jq -r '.id // .connection_id // empty' 2>/dev/null || true)"
+echo "==> 2. Listing Connections (OpenAPI ConnectionListResponse)..."
+CONNS="$(curl -sS "$API/v1/oauth/connections" -H "Authorization: Bearer $TOKEN")"
+echo "$CONNS" | jq . 2>/dev/null || echo "$CONNS"
+
+OR_ID="$(echo "$OR_RES" | jq -r '.id // .connection_id // .connection.id // empty' 2>/dev/null || true)"
+if [ -z "$OR_ID" ]; then
+  OR_ID="$(echo "$CONNS" | jq -r '(.connections // .)[]? | select(.provider=="openrouter") | (.id // .connection_id)' 2>/dev/null | head -n1 || true)"
+fi
 if [ -n "$OR_ID" ]; then
-  echo "==> Restricting OpenRouter Connector ($OR_ID) to sprite_labels: [\"patchguard\", \"llm\"]..."
+  echo "==> Restricting OpenRouter Connector ($OR_ID) to sprite_labels: [\"llm\"]..."
   curl -sS -X PUT "$API/v1/oauth/connections/$OR_ID" \
     -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" \
     -d '{"access_policy":{"sprite_labels":["llm"]}}' | jq .
 fi
 
-echo "==> 2. Checking existing Connections..."
-CONNS="$(curl -sS "$API/v1/oauth/connections" -H "Authorization: Bearer $TOKEN")"
-echo "$CONNS" | jq . 2>/dev/null || echo "$CONNS"
-
-GH_ID="$(echo "$CONNS" | jq -r '.[]? | select(.provider=="github") | (.id // .connection_id)' 2>/dev/null | head -n1 || true)"
-if [ -z "$GH_ID" ]; then
-  GH_ID="$(echo "$CONNS" | jq -r '(.connections // .[])[]? | select(.provider=="github") | (.id // .connection_id)' 2>/dev/null | head -n1 || true)"
-fi
+GH_ID="$(echo "$CONNS" | jq -r '(.connections // .)[]? | select(.provider=="github") | (.id // .connection_id)' 2>/dev/null | head -n1 || true)"
 
 if [ -n "$GH_ID" ]; then
   echo "==> Applying strict Zero-Secret GitHub path-scoping on Connector $GH_ID..."

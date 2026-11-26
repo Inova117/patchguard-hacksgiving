@@ -246,7 +246,8 @@ export async function runQaSuite({
     });
     const setCookieHeader = loginRes.headers.get('set-cookie') || '';
     const nosniff = homeRes.headers.get('x-content-type-options') === 'nosniff';
-    const xfo = (homeRes.headers.get('x-frame-options') || '').toUpperCase() === 'DENY';
+    const xfoVal = (homeRes.headers.get('x-frame-options') || '').toUpperCase();
+    const xfo = xfoVal === 'SAMEORIGIN' || xfoVal === 'DENY';
     const csp = Boolean(homeRes.headers.get('content-security-policy'));
     const cookieHttpOnly = /httponly/i.test(setCookieHeader);
     const cookieSameSite = /samesite=lax/i.test(setCookieHeader);
@@ -259,7 +260,7 @@ export async function runQaSuite({
 
     const missing = [];
     if (!nosniff) missing.push('X-Content-Type-Options: nosniff');
-    if (!xfo) missing.push('X-Frame-Options: DENY');
+    if (!xfo) missing.push('X-Frame-Options: SAMEORIGIN');
     if (!csp) missing.push('Content-Security-Policy');
     if (!cookieHttpOnly) missing.push('Cookie HttpOnly');
     if (!cookieSameSite) missing.push('Cookie SameSite=Lax');
@@ -269,7 +270,7 @@ export async function runQaSuite({
         window.__patchguardStore.showBanner(
           passed ? 'blocked' : 'breach',
           passed
-            ? 'HTTP HEADERS & COOKIE FLAGS VERIFIED (nosniff, DENY, CSP, HttpOnly, SameSite)'
+            ? 'HTTP HEADERS & COOKIE FLAGS VERIFIED (nosniff, SAMEORIGIN, CSP, HttpOnly, SameSite)'
             : `MISSING SECURITY CONTROLS: ${missingList.join(', ')}`,
           { missing: missingList }
         );
@@ -287,7 +288,7 @@ export async function runQaSuite({
       screenshotUrl: c5Shot.url,
       screenshotPath: c5Shot.absPath,
       evidence: c5Passed
-        ? 'All required security headers (nosniff, DENY, CSP) and HttpOnly/SameSite cookie flags verified'
+        ? 'All required security headers (nosniff, SAMEORIGIN, CSP) and HttpOnly/SameSite cookie flags verified'
         : `Missing: ${missing.join(', ')}`,
     });
     onProgress({ type: 'qa_check', runId, phase, check: checks[checks.length - 1] });

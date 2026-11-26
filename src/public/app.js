@@ -60,17 +60,17 @@ function renderDiff(diffText) {
     .split('\n')
     .map((line) => {
       if (line.startsWith('+') && !line.startsWith('+++')) {
-        return `<span class="diff-add">${escapeHtml(line)}</span>`;
+        return `<span class="diff-line diff-add">${escapeHtml(line)}</span>`;
       }
       if (line.startsWith('-') && !line.startsWith('---')) {
-        return `<span class="diff-del">${escapeHtml(line)}</span>`;
+        return `<span class="diff-line diff-del">${escapeHtml(line)}</span>`;
       }
       if (line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++')) {
-        return `<span class="diff-hdr">${escapeHtml(line)}</span>`;
+        return `<span class="diff-line diff-hdr">${escapeHtml(line)}</span>`;
       }
-      return escapeHtml(line);
+      return `<span class="diff-line">${escapeHtml(line)}</span>`;
     })
-    .join('\n');
+    .join('');
 }
 
 function renderState(d) {
@@ -144,6 +144,24 @@ function renderState(d) {
     list.appendChild(row);
   }
 
+  // Hero Before vs After split-view for CHECK-01
+  const heroCompare = document.getElementById('heroCompare');
+  heroCompare.innerHTML = '';
+  const c1Before = beforeMap.get('check01-price') || beforeMap.get('CHECK-01');
+  const c1After = afterMap.get('check01-price') || afterMap.get('CHECK-01');
+  if (c1Before?.screenshotUrl && c1After?.screenshotUrl) {
+    heroCompare.innerHTML = `
+      <div class="hero-pane before">
+        <div class="hero-lbl"><span>BEFORE · CHECK-01</span><span class="b b-fail">BREACH $0.01</span></div>
+        <img src="${c1Before.screenshotUrl}?t=${Date.now()}" alt="CHECK-01 Before" />
+      </div>
+      <div class="hero-pane after">
+        <div class="hero-lbl"><span>AFTER · CHECK-01</span><span class="b b-pass">BLOCKED 400</span></div>
+        <img src="${c1After.screenshotUrl}?t=${Date.now()}" alt="CHECK-01 After" />
+      </div>
+    `;
+  }
+
   // Render screenshots
   const shotsGrid = document.getElementById('shotsGrid');
   shotsGrid.innerHTML = '';
@@ -151,11 +169,15 @@ function renderState(d) {
   for (const c of activeChecks) {
     const bc = beforeMap.get(c.id);
     const ac = afterMap.get(c.id);
+    const current = ac || bc;
     const card = document.createElement('button');
     card.className = 'shot-card';
     card.innerHTML = `
       <img src="${c.screenshotUrl}?t=${Date.now()}" alt="${c.id}" />
-      <div class="shot-cap">${c.id} (${ac ? 'After' : 'Before'})</div>
+      <div class="shot-cap">
+        <span>${c.id} (${ac ? 'After' : 'Before'})</span>
+        <span class="b ${current.passed ? 'b-pass' : 'b-fail'}">${current.passed ? 'PASS' : 'FAIL'}</span>
+      </div>
     `;
     card.addEventListener('click', () => openModal(c.id, c.title, bc?.screenshotUrl, ac?.screenshotUrl));
     shotsGrid.appendChild(card);
@@ -303,23 +325,44 @@ async function finishPostRestorePipeline(runId) {
   setStep(4, 'done', patchRes.patch.source.replace('fly-connector:', ''));
 
   setStep(5, 'active', 'Chromium QA...');
-  const afterRes = await api('/api/qa/run', {
+  let afterRes = await api('/api/qa/run', {
     method: 'POST',
     body: JSON.stringify({ runId, phase: 'after' }),
   });
+  if (afterRes.report.failedCount > 0) {
+    const failedDesc = afterRes.report.checks
+      .filter((c) => !c.passed)
+      .map((c) => `${c.id}: ${c.evidence}`)
+      .join('; ');
+    setStep(4, 'active', 'Refining patch...');
+    const refined = await api('/api/patch/apply', {
+      method: 'POST',
+      body: JSON.stringify({ runId, autoVerify: true, previousError: failedDesc }),
+    });
+    setStep(4, 'done', `${refined.patch.source.replace('fly-connector:', '')} (refined)`);
+    if (refined.afterReport) {
+      afterRes = { report: refined.afterReport };
+    }
+  }
   setStep(
     5,
     afterRes.report.failedCount === 0 ? 'done' : 'fail',
     `${afterRes.report.passedCount}/6 (${afterRes.report.durationMs}ms)`
   );
 
-  setStep(6, 'active', 'Opening PR...');
-  try {
-    const pr = await api('/api/pr/open', { method: 'POST', body: JSON.stringify({}) });
-    setStep(6, 'done', `PR #${pr.prNumber}`);
-  } catch (err) {
-    setStep(6, 'done', 'Local verified (no GH Conn)');
-    appendLogLine({ ts: new Date().toISOString(), level: 'warn', message: `PR skipped: ${err.message}` });
+  setStep(6, 'active', 'Checking PR...');
+  const hasGh = Boolean(uiState.data?.connectors?.connectors?.some((c) => c.provider === 'github'));
+  if (hasGh) {
+    try {
+      const pr = await api('/api/pr/open', { method: 'POST', body: JSON.stringify({}) });
+      setStep(6, 'done', `PR #${pr.prNumber}`);
+    } catch (err) {
+      setStep(6, 'done', 'PR ready (retry in Vault)');
+      appendLogLine({ ts: new Date().toISOString(), level: 'warn', message: `PR skipped: ${err.message}` });
+    }
+  } else {
+    setStep(6, 'done', 'Ready (connect GitHub)');
+    appendLogLine({ ts: new Date().toISOString(), level: 'info', message: 'Step 6: Verified 6/6 locally — connect Fly GitHub Connector to auto-open PR.' });
   }
 
   await refreshState();

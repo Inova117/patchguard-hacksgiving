@@ -256,7 +256,7 @@ Requirements to satisfy EVERY check:
 2. CHECK-02 (Coupons): Reject duplicate coupons in request (HTTP 400). Use an atomic SQLite transaction (BEGIN IMMEDIATE ... UPDATE coupons SET times_used = times_used + 1 WHERE code = ? AND times_used < max_uses) checking result.changes === 1 (return HTTP 409 if exhausted). Maximum 1 coupon per order.
 3. CHECK-03 (Admin RBAC): GET /api/admin/orders and POST /api/admin/refund must return HTTP 403 unless req.user.role === 'admin'.
 4. CHECK-04 (Order Ownership): GET /api/orders/:id must return HTTP 403 unless order.user_id === req.user.id || req.user.role === 'admin'.
-5. CHECK-05 (Security headers & cookie flags): Middleware setting X-Content-Type-Options: nosniff, X-Frame-Options: DENY, Content-Security-Policy: default-src 'self' 'unsafe-inline'. Session cookie must include HttpOnly; SameSite=Lax.
+5. CHECK-05 (Security headers & cookie flags): Middleware setting X-Content-Type-Options: nosniff, X-Frame-Options: SAMEORIGIN, Content-Security-Policy: default-src 'self' 'unsafe-inline'; frame-ancestors 'self'; img-src 'self' data:. Session cookie must include HttpOnly; SameSite=Lax.
 6. CHECK-06 (Happy path): Normal checkout for valid items returns HTTP 201 with { order, dbHash }.
 
 Return STRICT JSON ONLY with keys: "summary" (string), "fixes" (string[]), "patched_code" (complete ES module JS file).

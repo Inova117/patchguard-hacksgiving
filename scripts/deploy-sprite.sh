@@ -41,12 +41,6 @@ sprite exec -s "$SPRITE_NAME" -- bash -lc '
   npm test
 '
 
-echo "==> Creating clean baseline CoW Checkpoint..."
-sprite exec -s "$SPRITE_NAME" -- bash -lc '
-  cd /home/sprite/patchguard
-  sprite-env checkpoints create --comment "v-baseline-clean"
-'
-
 echo "==> Registering wake-on-HTTP Sprite service on port 8080..."
 sprite exec -s "$SPRITE_NAME" -- bash -lc '
   cd /home/sprite/patchguard
@@ -57,6 +51,16 @@ sprite exec -s "$SPRITE_NAME" -- bash -lc '
     --dir /home/sprite/patchguard \
     --http-port 8080 \
     --no-stream
+  for i in $(seq 1 30); do
+    if curl -fsS http://127.0.0.1:8080/api/health >/dev/null 2>&1; then break; fi
+    sleep 0.3
+  done
+'
+
+echo "==> Creating clean baseline CoW Checkpoint (after service & DB seed)..."
+sprite exec -s "$SPRITE_NAME" -- bash -lc '
+  cd /home/sprite/patchguard
+  sprite-env checkpoints create --comment "v-baseline-clean"
 '
 
 echo "==> Publishing public Sprite URL..."

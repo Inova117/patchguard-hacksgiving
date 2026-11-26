@@ -364,11 +364,13 @@ app.post('/api/patch/apply', async (req, res) => {
   try {
     const runId = req.body?.runId || state.latestRunId || `run-${Date.now()}`;
     const autoVerify = req.body?.autoVerify !== false;
+    const previousError = req.body?.previousError || null;
     state.latestRunId = runId;
 
     emitLog('info', 'Generating defensive security patch (Zero-Secret LLM Connector / verifier)...');
     let patch = await applyPatch({
       qaReport: state.beforeReport,
+      previousError,
       hooks: { stopStore, startStore },
     });
     emitLog('success', `Patch applied via ${patch.source} (${patch.lineStats.added}+ / ${patch.lineStats.removed}- lines)`);
@@ -393,14 +395,28 @@ app.post('/api/patch/apply', async (req, res) => {
           .filter((c) => !c.passed)
           .map((c) => `${c.id}: ${c.evidence}`)
           .join('; ');
-        emitLog('warn', `Self-heal loop detected ${afterReport.failedCount} remaining failures; refining patch (${failedDesc})`);
+        emitLog('warn', `Self-heal round 2: feeding ${afterReport.failedCount} remaining failures back to LLM Connector (${failedDesc})`);
         patch = await applyPatch({
           qaReport: afterReport,
           previousError: failedDesc,
-          forceReference: true,
           hooks: { stopStore, startStore },
         });
         afterReport = await runQaSuite({ storeUrl: STORE_URL, runId, phase: 'after' });
+
+        if (afterReport.failedCount > 0 && patch.source !== 'local-deterministic-verifier') {
+          const remainingDesc = afterReport.checks
+            .filter((c) => !c.passed)
+            .map((c) => `${c.id}: ${c.evidence}`)
+            .join('; ');
+          emitLog('warn', `Self-heal fallback: applying deterministic verified patch for (${remainingDesc})`);
+          patch = await applyPatch({
+            qaReport: afterReport,
+            previousError: remainingDesc,
+            forceReference: true,
+            hooks: { stopStore, startStore },
+          });
+          afterReport = await runQaSuite({ storeUrl: STORE_URL, runId, phase: 'after' });
+        }
       }
       state.afterReport = afterReport;
     }

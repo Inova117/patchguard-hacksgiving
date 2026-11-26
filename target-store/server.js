@@ -79,10 +79,7 @@ app.post('/api/logout', (req, res) => {
 });
 
 app.get('/api/me', (req, res) => {
-  if (!req.user) {
-    return res.status(401).json({ error: 'Not authenticated' });
-  }
-  return res.json({ user: req.user });
+  return res.json({ user: req.user || null });
 });
 
 app.get('/api/products', (_req, res) => {
