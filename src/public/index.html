@@ -3,145 +3,185 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PatchGuard — Autonomous Browser Security QA &amp; Self-Healing Agent</title>
+  <title>PatchGuard — Autonomous Browser QA &amp; Self-Healing</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="app">
-    <header class="topbar">
-      <div class="brand-wrap">
-        <div class="logo-mark">PG</div>
-        <div>
-          <div class="brand-title">PatchGuard <span class="ver">Hacksgiving 2026</span></div>
-          <div class="brand-sub">Live Chromium QA · Fly Sprite CoW Checkpoints · Zero-Secret Connectors</div>
-        </div>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-name">PatchGuard</span>
+        <span class="brand-sep">/</span>
+        <span class="brand-sub">Fly Sprite QA &amp; Self-Heal</span>
       </div>
 
-      <div class="status-pills">
-        <span class="pill" id="runtimePill">Runtime: detecting...</span>
-        <span class="pill" id="dbPill">DB SHA-256: —</span>
-        <span class="pill" id="secretsPill">Secrets: checking...</span>
+      <div class="status-strip" aria-label="Runtime status">
+        <span class="status-item" id="runtimePill">Detecting runtime…</span>
+        <span class="status-sep">·</span>
+        <span class="status-item" id="dbPill">DB —</span>
+        <span class="status-sep">·</span>
+        <span class="status-item" id="secretsPill">Secrets —</span>
       </div>
 
       <div class="actions">
-        <button class="btn primary" id="runLoopBtn">▶ Run Autonomous Self-Heal Loop</button>
-        <button class="btn" id="resetBtn">↺ Reset Vulnerable Demo</button>
-      </div>
-    </header>
-
-    <section class="pipeline" id="pipelineBar">
-      <div class="step" data-step="1"><span class="step-num">1</span><div><div class="step-name">CoW Checkpoint</div><div class="step-meta" id="step1Meta">Idle</div></div></div>
-      <div class="step" data-step="2"><span class="step-num">2</span><div><div class="step-name">Chromium QA (Before)</div><div class="step-meta" id="step2Meta">Idle</div></div></div>
-      <div class="step" data-step="3"><span class="step-num">3</span><div><div class="step-name">Sprite CoW Restore</div><div class="step-meta" id="step3Meta">Idle</div></div></div>
-      <div class="step" data-step="4"><span class="step-num">4</span><div><div class="step-name">Zero-Secret AI Patch</div><div class="step-meta" id="step4Meta">Idle</div></div></div>
-      <div class="step" data-step="5"><span class="step-num">5</span><div><div class="step-name">Chromium Re-Verify</div><div class="step-meta" id="step5Meta">Idle</div></div></div>
-      <div class="step" data-step="6"><span class="step-num">6</span><div><div class="step-name">Verified GitHub PR</div><div class="step-meta" id="step6Meta">Idle</div></div></div>
-    </section>
-
-    <div class="metrics-row">
-      <div class="metric-card">
-        <div class="metric-label">QA Pass Rate (Before → After)</div>
-        <div class="metric-val" id="passMetric">— / 6</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-label">Revenue Leak Prevented</div>
-        <div class="metric-val leak" id="leakMetric">$0.00</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-label">Filesystem CoW Restore</div>
-        <div class="metric-val" id="restoreMetric">— ms</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-label">Raw Credentials in Sprite</div>
-        <div class="metric-val ok" id="secretCountMetric">0</div>
+        <button class="btn" id="resetBtn">Reset demo</button>
+        <button class="btn primary" id="runLoopBtn">Run self-heal</button>
       </div>
     </div>
+  </header>
 
-    <main class="main-grid">
-      <section class="card">
-        <div class="card-head">
-          <h2>6-Check Browser QA Assertions</h2>
+  <div class="shell">
+    <section class="pipeline" id="pipelineBar" aria-label="Execution pipeline">
+      <div class="step" data-step="1">
+        <div class="step-top"><span class="step-num">01</span><span class="step-name">CoW Checkpoint</span></div>
+        <div class="step-meta" id="step1Meta">Idle</div>
+      </div>
+      <div class="step" data-step="2">
+        <div class="step-top"><span class="step-num">02</span><span class="step-name">Chromium QA</span></div>
+        <div class="step-meta" id="step2Meta">Idle</div>
+      </div>
+      <div class="step" data-step="3">
+        <div class="step-top"><span class="step-num">03</span><span class="step-name">CoW Restore</span></div>
+        <div class="step-meta" id="step3Meta">Idle</div>
+      </div>
+      <div class="step" data-step="4">
+        <div class="step-top"><span class="step-num">04</span><span class="step-name">Zero-Secret Patch</span></div>
+        <div class="step-meta" id="step4Meta">Idle</div>
+      </div>
+      <div class="step" data-step="5">
+        <div class="step-top"><span class="step-num">05</span><span class="step-name">Re-Verify</span></div>
+        <div class="step-meta" id="step5Meta">Idle</div>
+      </div>
+      <div class="step" data-step="6">
+        <div class="step-top"><span class="step-num">06</span><span class="step-name">GitHub PR</span></div>
+        <div class="step-meta" id="step6Meta">Idle</div>
+      </div>
+    </section>
+
+    <section class="metrics-strip" aria-label="Verification telemetry">
+      <div class="metric-cell">
+        <div class="metric-label">Assertions passed</div>
+        <div class="metric-val" id="passMetric">— / 6</div>
+      </div>
+      <div class="metric-cell">
+        <div class="metric-label">Revenue leak prevented</div>
+        <div class="metric-val leak" id="leakMetric">$0.00</div>
+      </div>
+      <div class="metric-cell">
+        <div class="metric-label">CoW filesystem restore</div>
+        <div class="metric-val" id="restoreMetric">— ms</div>
+      </div>
+      <div class="metric-cell">
+        <div class="metric-label">Raw secrets in Sprite</div>
+        <div class="metric-val ok" id="secretCountMetric">0</div>
+      </div>
+    </section>
+
+    <main class="workspace">
+      <section class="pane pane-left">
+        <div class="pane-head">
+          <h2>Browser QA Assertions</h2>
           <div class="inline-btns">
-            <button class="btn sm" id="runBeforeBtn">Run Before QA</button>
-            <button class="btn sm" id="runAfterBtn">Run After QA</button>
+            <button class="btn sm" id="runBeforeBtn">Run before</button>
+            <button class="btn sm" id="runAfterBtn">Run after</button>
           </div>
         </div>
+
         <div class="checks-list" id="checksList"></div>
 
-        <h3 class="sub-head">Real Headless Chromium Evidence (Before vs After)</h3>
-        <div class="hero-compare" id="heroCompare"></div>
-        <div class="shots-grid" id="shotsGrid"></div>
+        <div class="evidence-section">
+          <div class="sub-head">Headless Chromium Evidence</div>
+          <div class="hero-compare" id="heroCompare"></div>
+          <div class="shots-grid" id="shotsGrid"></div>
+          <div class="empty-hint" id="shotsEmptyHint">Screenshots appear automatically once Chromium executes the assertions.</div>
+        </div>
       </section>
 
-      <section class="card">
-        <div class="tabs" id="tabsBar">
-          <button class="tab active" data-tab="repo">Real GitHub Repo</button>
-          <button class="tab" data-tab="diff">Code Diff</button>
-          <button class="tab" data-tab="checkpoints">Sprite Checkpoints</button>
-          <button class="tab" data-tab="vault">Zero-Secret Vault</button>
-          <button class="tab" data-tab="store">Live Storefront</button>
-          <button class="tab" data-tab="logs">Live SSE Log</button>
+      <section class="pane pane-right">
+        <div class="tabs" id="tabsBar" role="tablist">
+          <button class="tab active" data-tab="diff" role="tab">Code Diff</button>
+          <button class="tab" data-tab="repo" role="tab">Real GitHub Repo</button>
+          <button class="tab" data-tab="checkpoints" role="tab">Checkpoints</button>
+          <button class="tab" data-tab="vault" role="tab">Zero-Secret Vault</button>
+          <button class="tab" data-tab="store" role="tab">Storefront</button>
+          <button class="tab" data-tab="logs" role="tab">Event Log</button>
         </div>
 
-        <div class="tab-panel" id="tab-diff">
-          <div class="panel-actions">
-            <span class="muted" id="patchMeta">Run the self-heal loop or apply patch to view diff.</span>
-            <button class="btn sm" id="applyPatchBtn">Apply Patch Only</button>
+        <div class="tab-panel active" id="tab-diff">
+          <div class="panel-bar">
+            <span class="muted" id="patchMeta">Run the self-heal loop or apply a patch to inspect the unified diff.</span>
+            <button class="btn sm" id="applyPatchBtn">Apply patch</button>
           </div>
-          <pre class="diff-view" id="diffView">No patch generated yet.</pre>
+          <pre class="code-view" id="diffView">No patch generated yet.</pre>
+        </div>
+
+        <div class="tab-panel" id="tab-repo">
+          <div class="repo-controls">
+            <input id="repoUrlInput" value="https://github.com/Inova117/patchguard-hacksgiving" placeholder="https://github.com/owner/public-repo" />
+            <div class="repo-btns">
+              <button class="btn sm primary" id="auditRepoBtn">1. Audit repo</button>
+              <button class="btn sm" id="healRepoBtn">2. AI self-heal</button>
+              <button class="btn sm" id="prRepoBtn">3. Open PR</button>
+            </div>
+          </div>
+          <div class="presets-row">
+            <span class="muted">Public targets:</span>
+            <button class="link-btn repo-preset" data-url="https://github.com/Inova117/patchguard-hacksgiving">Inova117/patchguard-hacksgiving</button>
+            <span class="status-sep">·</span>
+            <button class="link-btn repo-preset" data-url="https://github.com/vitejs/vite-plugin-react">vitejs/vite-plugin-react</button>
+          </div>
+          <div id="repoVisualSummary" class="info-block">
+            <span class="muted">Clones any public GitHub repo inside the Fly Sprite, runs <code>npm install</code>, <code>npm audit</code>, static checks, build/tests, live Chromium inspection, Zero-Secret LLM patching, and PR creation.</span>
+          </div>
+          <div id="repoShots" class="hero-compare"></div>
+          <pre class="code-view" id="repoAuditResult" style="max-height:280px;">Ready to audit a public GitHub repository.</pre>
         </div>
 
         <div class="tab-panel" id="tab-checkpoints">
-          <div class="panel-actions">
-            <button class="btn sm primary" id="createCpBtn">+ Create Checkpoint</button>
-            <button class="btn sm" id="restoreCpBtn">Restore Baseline</button>
-            <button class="btn sm" id="diffCpBtn">Diff Live vs Checkpoint</button>
+          <div class="panel-bar">
+            <span class="muted">Copy-on-Write filesystem snapshots managed by Fly Sprites.</span>
+            <div class="inline-btns">
+              <button class="btn sm primary" id="createCpBtn">New checkpoint</button>
+              <button class="btn sm" id="restoreCpBtn">Restore baseline</button>
+              <button class="btn sm" id="diffCpBtn">Diff live</button>
+            </div>
           </div>
-          <div id="checkpointsList" class="cp-list"></div>
-          <pre class="diff-view" id="cpDiffView" style="margin-top:10px;max-height:220px;">Select "Diff Live vs Checkpoint" to inspect filesystem changes.</pre>
+          <div id="checkpointsList" class="flat-list"></div>
+          <pre class="code-view" id="cpDiffView" style="margin-top:12px;max-height:220px;">Select "Diff live" to inspect filesystem changes since baseline.</pre>
         </div>
 
         <div class="tab-panel" id="tab-vault">
-          <div class="panel-actions">
-            <button class="btn sm primary" id="testGuardrailsBtn">Run Live 403 Guardrail Proof</button>
-            <button class="btn sm" id="openPrBtn">Open Verified GitHub PR</button>
+          <div class="panel-bar">
+            <span class="muted">Zero raw credentials inside the Sprite; Fly Gateway enforces endpoint policies.</span>
+            <div class="inline-btns">
+              <button class="btn sm primary" id="testGuardrailsBtn">Run 403 guardrail proof</button>
+              <button class="btn sm" id="openPrBtn">Open GitHub PR</button>
+            </div>
           </div>
-          <div id="vaultSummary" class="vault-box"></div>
-          <div id="prBox" class="vault-box" style="margin-top:10px;"></div>
+          <div id="vaultSummary" class="info-block"></div>
+          <div id="prBox" class="info-block" style="margin-top:10px;"></div>
         </div>
 
         <div class="tab-panel" id="tab-store">
-          <div class="panel-actions">
-            <span class="muted">Live PixelMart running on <code>127.0.0.1:4100</code> proxied via <code>/pixelmart/</code></span>
-            <div>
-              <button class="btn sm" id="reloadStoreBtn">Reload Frame</button>
-              <a class="btn sm" href="/pixelmart/" target="_blank" rel="noopener">Open Tab ↗</a>
+          <div class="panel-bar">
+            <span class="muted">Target app on <code>127.0.0.1:4100</code> proxied via <code>/pixelmart/</code></span>
+            <div class="inline-btns">
+              <button class="btn sm" id="reloadStoreBtn">Reload</button>
+              <a class="btn sm" href="/pixelmart/" target="_blank" rel="noopener">Open in tab ↗</a>
             </div>
           </div>
           <iframe id="storeFrame" src="/pixelmart/" title="PixelMart Storefront"></iframe>
         </div>
 
         <div class="tab-panel" id="tab-logs">
+          <div class="panel-bar">
+            <span class="muted">Live Server-Sent Events stream from the Sprite process.</span>
+          </div>
           <div class="terminal" id="sseTerminal"></div>
-        </div>
-
-        <div class="tab-panel active" id="tab-repo">
-          <div class="panel-actions">
-            <input id="repoUrlInput" value="https://github.com/Inova117/patchguard-hacksgiving" placeholder="https://github.com/owner/public-repo" style="flex:1;" />
-            <button class="btn sm primary" id="auditRepoBtn">1. Audit Real Repo</button>
-            <button class="btn sm" id="healRepoBtn">2. AI Self-Heal (Zero-Secret LLM)</button>
-            <button class="btn sm" id="prRepoBtn">3. Open GitHub PR</button>
-          </div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
-            <span class="muted">Quick public targets:</span>
-            <button class="btn sm repo-preset" data-url="https://github.com/Inova117/patchguard-hacksgiving">patchguard-hacksgiving (This Repo)</button>
-            <button class="btn sm repo-preset" data-url="https://github.com/vitejs/vite-plugin-react">vitejs/vite-plugin-react (OSS)</button>
-          </div>
-          <div id="repoVisualSummary" class="vault-box" style="margin-bottom:10px;">
-            <span class="muted">Paste any real GitHub repo → PatchGuard clones it inside the Fly Sprite, runs <code>npm install</code>, <code>npm audit</code> (real CVEs), static scan, build/tests, boots the app in live Chromium, patches it via Zero-Secret LLM, re-verifies, and opens a GitHub PR.</span>
-          </div>
-          <div id="repoShots" class="hero-compare"></div>
-          <pre class="diff-view" id="repoAuditResult" style="max-height:280px;">Ready to audit a real GitHub repository.</pre>
         </div>
       </section>
     </main>
@@ -150,7 +190,7 @@
   <div class="modal" id="shotModal">
     <div class="modal-inner">
       <div class="modal-head">
-        <strong id="modalTitle">Screenshot Comparison</strong>
+        <strong id="modalTitle">Screenshot comparison</strong>
         <button class="btn sm" id="closeModalBtn">Close</button>
       </div>
       <div class="modal-imgs" id="modalImgs"></div>

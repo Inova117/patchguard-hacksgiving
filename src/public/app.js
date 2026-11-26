@@ -78,20 +78,20 @@ function renderState(d) {
 
   const rt = d.runtime;
   const rtPill = document.getElementById('runtimePill');
-  rtPill.textContent = rt.isFlySprite ? `Fly Sprite (${rt.hostname})` : `Local Sandbox (${rt.mode})`;
-  rtPill.className = `pill ${rt.isFlySprite ? 'ok' : 'warn'}`;
+  rtPill.textContent = rt.isFlySprite ? `Sprite · ${rt.hostname}` : `Local · ${rt.mode}`;
+  rtPill.className = `status-item ${rt.isFlySprite ? 'ok' : 'warn'}`;
 
   const dbPill = document.getElementById('dbPill');
-  const hashShort = d.store?.dbHash ? d.store.dbHash.slice(0, 12) : '—';
+  const hashShort = d.store?.dbHash ? d.store.dbHash.slice(0, 10) : '—';
   const dbDirty = d.store?.baselineDbHash && d.store?.dbHash !== d.store.baselineDbHash;
-  dbPill.textContent = `DB ${hashShort}… ${dbDirty ? '(MODIFIED)' : '(CLEAN)'}`;
-  dbPill.className = `pill ${dbDirty ? 'warn' : 'ok'}`;
+  dbPill.textContent = `DB ${hashShort} ${dbDirty ? 'modified' : 'clean'}`;
+  dbPill.className = `status-item ${dbDirty ? 'warn' : 'ok'}`;
 
   const secPill = document.getElementById('secretsPill');
   secPill.textContent = d.zeroSecrets?.zeroSecretsVerified
-    ? 'Zero-Secret Verified (0 keys)'
-    : `Secrets found: ${d.zeroSecrets?.sensitiveEnvKeys?.length || 0}`;
-  secPill.className = `pill ${d.zeroSecrets?.zeroSecretsVerified ? 'ok' : 'danger'}`;
+    ? '0 raw secrets'
+    : `${d.zeroSecrets?.sensitiveEnvKeys?.length || 0} secrets found`;
+  secPill.className = `status-item ${d.zeroSecrets?.zeroSecretsVerified ? 'ok' : 'danger'}`;
   document.getElementById('secretCountMetric').textContent = String(
     d.zeroSecrets?.sensitiveEnvKeys?.length || 0
   );
@@ -101,16 +101,18 @@ function renderState(d) {
   document.getElementById('passMetric').textContent = b && a
     ? `${b.passedCount}/6 → ${a.passedCount}/6`
     : b
-      ? `${b.passedCount}/6 (Before)`
+      ? `${b.passedCount}/6`
       : a
-        ? `${a.passedCount}/6 (After)`
+        ? `${a.passedCount}/6`
         : '— / 6';
 
   const leak = b ? (b.revenueLeakCents || 0) / 100 : 0;
-  document.getElementById('leakMetric').textContent = `$${leak.toLocaleString('en-US', {
+  const leakEl = document.getElementById('leakMetric');
+  leakEl.textContent = `$${leak.toLocaleString('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
+  leakEl.classList.toggle('has-leak', leak > 0);
 
   if (d.lastRestoreResult?.durationMs !== undefined) {
     document.getElementById('restoreMetric').textContent = `${d.lastRestoreResult.durationMs} ms`;
@@ -127,15 +129,19 @@ function renderState(d) {
     const ac = afterMap.get(def.id);
     const row = document.createElement('div');
     row.className = 'check-item';
+    const shortNum = def.id.replace('CHECK-', '');
     row.innerHTML = `
       <div class="check-top">
-        <div class="check-title">${def.id} · ${def.title}</div>
+        <div class="check-title-wrap">
+          <span class="check-id">${shortNum}</span>
+          <div class="check-title">${def.title}</div>
+        </div>
         <div class="badges">
           <span class="b ${bc ? (bc.passed ? 'b-pass' : 'b-fail') : 'b-idle'}">
-            Before: ${bc ? (bc.passed ? 'PASS' : 'FAIL') : '—'}
+            ${bc ? (bc.passed ? 'Before PASS' : 'Before FAIL') : 'Before —'}
           </span>
           <span class="b ${ac ? (ac.passed ? 'b-pass' : 'b-fail') : 'b-idle'}">
-            After: ${ac ? (ac.passed ? 'PASS' : 'FAIL') : '—'}
+            ${ac ? (ac.passed ? 'After PASS' : 'After FAIL') : 'After —'}
           </span>
         </div>
       </div>
@@ -166,6 +172,8 @@ function renderState(d) {
   const shotsGrid = document.getElementById('shotsGrid');
   shotsGrid.innerHTML = '';
   const activeChecks = (a?.checks || b?.checks || []).filter((c) => c.screenshotUrl);
+  const emptyHint = document.getElementById('shotsEmptyHint');
+  if (emptyHint) emptyHint.style.display = activeChecks.length ? 'none' : 'block';
   for (const c of activeChecks) {
     const bc = beforeMap.get(c.id);
     const ac = afterMap.get(c.id);
@@ -186,10 +194,10 @@ function renderState(d) {
   // Patch diff
   if (d.latestPatch) {
     document.getElementById('patchMeta').textContent =
-      `Source: ${d.latestPatch.source} (${d.latestPatch.model}) · +${d.latestPatch.lineStats.added} / -${d.latestPatch.lineStats.removed}`;
+      `${d.latestPatch.source.replace('fly-connector:', '')} · ${d.latestPatch.model} · +${d.latestPatch.lineStats.added} / -${d.latestPatch.lineStats.removed}`;
     renderDiff(d.latestPatch.unifiedDiff);
   } else {
-    document.getElementById('patchMeta').textContent = 'Run the self-heal loop or apply patch to view diff.';
+    document.getElementById('patchMeta').textContent = 'Run the self-heal loop or apply a patch to inspect the unified diff.';
     renderDiff(null);
   }
 
@@ -201,8 +209,8 @@ function renderState(d) {
     div.className = 'cp-item';
     div.innerHTML = `
       <div>
-        <strong>${escapeHtml(cp.id)}</strong> · ${escapeHtml(cp.comment || '')}
-        <div class="muted">${escapeHtml(cp.mode)} · db=${cp.dbHash ? cp.dbHash.slice(0, 10) : '—'}</div>
+        <strong>${escapeHtml(cp.id)}</strong> <span class="muted">${escapeHtml(cp.comment || '')}</span>
+        <div class="muted" style="font-family:var(--mono);font-size:11px;">${escapeHtml(cp.mode)} · db=${cp.dbHash ? cp.dbHash.slice(0, 10) : '—'}</div>
       </div>
       <button class="btn sm" data-restore="${escapeHtml(cp.id)}">Restore</button>
     `;
@@ -215,18 +223,18 @@ function renderState(d) {
   const conns = d.connectors?.connectors || [];
   let guardrailHtml = '';
   if (d.latestGuardrailTest) {
-    guardrailHtml = `<div style="margin-top:6px;"><strong>Live Gateway Probes:</strong></div>` +
+    guardrailHtml = `<div style="margin-top:6px;"><strong>Live Gateway Policy Probes</strong></div>` +
       d.latestGuardrailTest.probes
         .map(
           (p) =>
-            `<div class="muted">${p.passed ? '✅' : '⚠️'} ${escapeHtml(p.name)} → HTTP ${p.status} (${p.latencyMs ?? 0}ms)</div>`
+            `<div class="probe-row"><span>${escapeHtml(p.name)}</span><span class="b ${p.passed ? 'b-pass' : 'b-fail'}">HTTP ${p.status} · ${p.latencyMs ?? 0}ms</span></div>`
         )
         .join('');
   }
   vault.innerHTML = `
-    <div><strong>Zero-Secret Attestation:</strong> ${escapeHtml(d.zeroSecrets?.attestation)}</div>
-    <div><strong>Total env vars scanned:</strong> ${d.zeroSecrets?.totalEnvVars ?? 0}</div>
-    <div><strong>Fly Gateway Discovery:</strong> ${
+    <div><strong>Attestation:</strong> ${escapeHtml(d.zeroSecrets?.attestation)}</div>
+    <div><strong>Environment scanned:</strong> ${d.zeroSecrets?.totalEnvVars ?? 0} variables</div>
+    <div><strong>Fly Gateway:</strong> ${
       d.connectors?.available
         ? `${conns.length} active connectors (${conns.map((c) => c.provider).join(', ') || 'none'})`
         : `Off-Sprite local mode (${escapeHtml(d.connectors?.reason || 'gateway identity requires Fly Sprite')})`
@@ -236,8 +244,8 @@ function renderState(d) {
 
   const prBox = document.getElementById('prBox');
   prBox.innerHTML = d.latestPr?.prUrl
-    ? `<strong>Verified GitHub PR #${d.latestPr.prNumber}:</strong> <a style="color:#60a5fa;" href="${escapeHtml(d.latestPr.prUrl)}" target="_blank" rel="noopener">${escapeHtml(d.latestPr.prUrl)}</a>`
-    : `<span class="muted">PR not opened yet. Once patched and verified on Fly Sprite with GitHub Connector, click "Open Verified GitHub PR".</span>`;
+    ? `<div><strong>Verified Pull Request #${d.latestPr.prNumber}</strong></div><a href="${escapeHtml(d.latestPr.prUrl)}" target="_blank" rel="noopener">${escapeHtml(d.latestPr.prUrl)}</a>`
+    : `<span class="muted">No PR opened yet. Once verified on the Fly Sprite, click "Open GitHub PR" or run the full loop.</span>`;
 }
 
 function openModal(id, title, beforeUrl, afterUrl) {
@@ -321,14 +329,24 @@ async function waitForSpriteReconnect(startedAtMs, previousBootId = null) {
 }
 
 async function finishPostRestorePipeline(runId) {
-  setStep(4, 'active', 'Patching...');
+  const formatPatchStepMeta = (patch) => {
+    const modelShort = String(patch.model || '')
+      .replace(/^[^/]+\//, '')
+      .replace(/:free$/, '');
+    if (patch.source?.startsWith('fly-connector:')) {
+      return modelShort || patch.source.replace('fly-connector:', '');
+    }
+    return patch.source || 'patched';
+  };
+
+  setStep(4, 'active', 'Patching via LLM…');
   const patchRes = await api('/api/patch/apply', {
     method: 'POST',
     body: JSON.stringify({ runId, autoVerify: false }),
   });
-  setStep(4, 'done', patchRes.patch.source.replace('fly-connector:', ''));
+  setStep(4, 'done', formatPatchStepMeta(patchRes.patch));
 
-  setStep(5, 'active', 'Chromium QA...');
+  setStep(5, 'active', 'Chromium QA…');
   let afterRes = await api('/api/qa/run', {
     method: 'POST',
     body: JSON.stringify({ runId, phase: 'after' }),
@@ -338,12 +356,12 @@ async function finishPostRestorePipeline(runId) {
       .filter((c) => !c.passed)
       .map((c) => `${c.id}: ${c.evidence}`)
       .join('; ');
-    setStep(4, 'active', 'Refining patch...');
+    setStep(4, 'active', 'Refining via LLM…');
     const refined = await api('/api/patch/apply', {
       method: 'POST',
       body: JSON.stringify({ runId, autoVerify: true, previousError: failedDesc }),
     });
-    setStep(4, 'done', `${refined.patch.source.replace('fly-connector:', '')} (refined)`);
+    setStep(4, 'done', `${formatPatchStepMeta(refined.patch)} (r2)`);
     if (refined.afterReport) {
       afterRes = { report: refined.afterReport };
     }

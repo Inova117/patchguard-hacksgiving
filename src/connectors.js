@@ -263,7 +263,8 @@ export async function callLlmJsonViaConnector(prompt, { maxTokens = 2800, timeou
     ? [process.env.PATCHGUARD_OLLAMA_MODEL || 'qwen2.5-coder:32b']
     : [
         process.env.PATCHGUARD_OPENROUTER_MODEL || 'nvidia/nemotron-3.5-lightning:free',
-        'openrouter/free',
+        'baidu/ernie-5.5-flash-preview:free',
+        'google/gemma-4-26b-a4b-it:free',
       ];
 
   const base = llm.gatewayBaseUrl.endsWith('/v1') && !isOllama
@@ -337,7 +338,7 @@ export async function generateSurgicalEditsViaLlm({
   previousError = null,
 }) {
   const filesBlock = filesContext
-    .map((f) => `--- FILE: ${f.path} ---\n${f.content.slice(0, 6500)}`)
+    .map((f) => `--- FILE: ${f.path} ---\n${f.content.slice(0, 14000)}`)
     .join('\n\n');
 
   const prompt = `You are PatchGuard, an autonomous defensive security & QA engineer.
@@ -349,12 +350,13 @@ ${previousError ? `\nPrevious patch attempt failed verification with error:\n${p
 Rules:
 - Return ONLY strict valid JSON with keys: "summary" (string), "fixes" (string[]), "edits" (array of {"file": string, "find": string, "replace": string}).
 - Every "find" string MUST match an EXACT verbatim substring from the provided file contents.
+- NEVER use "..." or ellipsis placeholders inside "replace" code — every edit must be 100% complete, valid, runnable code.
 - Keep edits minimal, valid syntax, and preserve all existing app functionality. Do NOT add uninstalled npm packages (use built-in Node/Express/Vite/HTML features only).
 
 Files:
 ${filesBlock}`;
 
-  const result = await callLlmJsonViaConnector(prompt, { maxTokens: 2600, timeoutMs: 22000 });
+  const result = await callLlmJsonViaConnector(prompt, { maxTokens: 4096, timeoutMs: 28000 });
   if (!result) return null;
 
   const { parsed } = result;
@@ -374,56 +376,118 @@ ${filesBlock}`;
 }
 
 /**
- * Request surgical security patch for PixelMart target-store/server.js via Fly Zero-Secret LLM Connector.
+ * Request a complete verified security patch for PixelMart target-store/server.js via Fly Zero-Secret LLM Connector.
  */
 export async function generatePatchViaLlmConnector({ vulnerableCode, qaFindings, previousError = null }) {
-  const findingsList = [
-    ...(qaFindings || [])
-      .filter((c) => !c.passed)
-      .map((c) => `${c.id} (${c.title}): ${c.evidence}`),
-    'CHECK-01 exact spec: Reject client unit_price_cents !== product.price_cents or !Number.isInteger(qty) || qty <= 0 with HTTP 400; always use product.price_cents.',
-    'CHECK-02 exact spec: Reject duplicate/stacked coupons (normalizedCoupons.length > 1) with HTTP 400; inside BEGIN IMMEDIATE transaction run UPDATE coupons SET times_used = times_used + 1 WHERE code = ? AND times_used < max_uses and return HTTP 409 if changes !== 1.',
-    'CHECK-03 exact spec: GET /api/admin/orders and POST /api/admin/refund must return HTTP 403 when req.user.role !== "admin".',
-    'CHECK-04 exact spec: GET /api/orders/:id must return HTTP 403 when order.user_id !== req.user.id && req.user.role !== "admin".',
-    'CHECK-05 exact spec: Add middleware setting X-Content-Type-Options: nosniff, X-Frame-Options: SAMEORIGIN, Content-Security-Policy: default-src \'self\' \'unsafe-inline\'; frame-ancestors \'self\'; img-src \'self\' data:. Add HttpOnly; SameSite=Lax to pm_session Set-Cookie.',
-  ];
+  const discovery = await discoverConnectors();
+  if (!discovery.available) return null;
 
-  const res = await generateSurgicalEditsViaLlm({
-    repoName: 'PixelMart (target-store/server.js)',
-    findings: findingsList,
-    filesContext: [{ path: 'target-store/server.js', content: vulnerableCode }],
-    previousError,
-  });
-  if (!res) return null;
+  const llm =
+    discovery.connectors.find((c) => c.provider === 'openrouter' && c.gatewayBaseUrl) ||
+    discovery.connectors.find((c) => c.provider === 'ollama' && c.gatewayBaseUrl) ||
+    discovery.connectors.find((c) => ['openai', 'anthropic', 'gemini'].includes(c.provider) && c.gatewayBaseUrl);
+  if (!llm) return null;
 
-  let patchedCode = vulnerableCode;
-  let appliedCount = 0;
-  for (const edit of res.edits) {
-    if (!edit?.find || typeof edit.replace !== 'string') continue;
-    if (patchedCode.includes(edit.find)) {
-      patchedCode = patchedCode.replace(edit.find, edit.replace);
-      appliedCount += 1;
+  const isOllama = llm.provider === 'ollama';
+  const candidateModels = isOllama
+    ? [process.env.PATCHGUARD_OLLAMA_MODEL || 'qwen2.5-coder:32b']
+    : [
+        process.env.PATCHGUARD_OPENROUTER_MODEL || 'nvidia/nemotron-3.5-super-vl:free',
+        'nvidia/nemotron-3.5-lightning:free',
+      ];
+
+  const base = llm.gatewayBaseUrl.endsWith('/v1') && !isOllama
+    ? llm.gatewayBaseUrl.slice(0, -3)
+    : llm.gatewayBaseUrl;
+  const endpoint = isOllama ? `${base}/api/chat` : `${base}/v1/chat/completions`;
+
+  const failedSummary = (qaFindings || [])
+    .filter((c) => !c.passed)
+    .map((c) => `- ${c.id} (${c.title}): ${c.evidence}`)
+    .join('\n');
+
+  const prompt = `You are PatchGuard, an autonomous defensive security engineer.
+Fix all 5 security issues in this Express + node:sqlite server.js and return ONLY the complete, runnable JavaScript file inside a single \`\`\`js code fence (no prose before or after, no "..." placeholders).
+CRITICAL: Keep the top 14 lines (all 5 import statements including \`import { fileURLToPath } from 'node:url';\`, __dirname, constants, db init, sessions, app) verbatim.
+${failedSummary ? `\nObserved Browser QA Failures:\n${failedSummary}\n` : ''}${previousError ? `\nPrevious patch attempt failed verification with:\n${previousError}\nFix that error completely.\n` : ''}
+Exact requirements:
+1. CHECK-01: In POST /api/checkout, reject with HTTP 400 if (item.unit_price_cents !== undefined && item.unit_price_cents !== product.price_cents) OR (!Number.isInteger(qty) || qty <= 0 || qty > product.stock). Never reject legitimate checkouts where item.unit_price_cents is undefined; always compute subtotal using product.price_cents.
+2. CHECK-02: In POST /api/checkout, reject with HTTP 400 if requestedCoupons.length > 1. Wrap coupon lookup + atomic UPDATE coupons SET times_used = times_used + 1 WHERE code = ? AND times_used < max_uses (if unknown coupon call db.exec("ROLLBACK") and return 400; if changes !== 1 call db.exec("ROLLBACK") and return 409) + INSERT INTO orders inside db.exec("BEGIN IMMEDIATE") and db.exec("COMMIT") (in catch call db.exec("ROLLBACK") and return 500). Do not redeclare couponCode.
+3. CHECK-03: In GET /api/admin/orders and POST /api/admin/refund, return HTTP 403 when req.user.role !== "admin".
+4. CHECK-04: In GET /api/orders/:id, return HTTP 403 when order.user_id !== req.user.id && req.user.role !== "admin".
+5. CHECK-05: Immediately after "const app = express();" and BEFORE app.use(express.static(...)), add app.disable("x-powered-by"); and the exact middleware: app.use((req, res, next) => { res.setHeader("X-Content-Type-Options", "nosniff"); res.setHeader("X-Frame-Options", "SAMEORIGIN"); res.setHeader("Content-Security-Policy", "default-src 'self' 'unsafe-inline'; frame-ancestors 'self'; img-src 'self' data:"); next(); }); (use parameter names req, res, next — NOT _res!). On /api/login and /api/logout, set pm_session cookie with EXACT flags "Path=/; HttpOnly; SameSite=Lax" (do NOT add Secure flag because loopback QA runs over http://127.0.0.1). Keep all existing routes and app.use(express.static(...)) intact.
+
+\`\`\`js
+${vulnerableCode}
+\`\`\``;
+
+  let lastErr = null;
+  for (const model of candidateModels) {
+    const body = isOllama
+      ? { model, stream: false, messages: [{ role: 'user', content: prompt }] }
+      : {
+          model,
+          temperature: 0,
+          max_tokens: 4800,
+          ...(model.includes('nemotron') ? { reasoning: { effort: 'none' } } : {}),
+          messages: [{ role: 'user', content: prompt }],
+        };
+
+    const t0 = Date.now();
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(25000),
+      });
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => '');
+        lastErr = new Error(`Fly LLM Connector (${llm.provider}/${model}) HTTP ${res.status}: ${errBody.slice(0, 160)}`);
+        continue;
+      }
+      const data = await res.json();
+      const rawContent = isOllama ? data?.message?.content : data?.choices?.[0]?.message?.content;
+      if (!rawContent || rawContent.length < 500) {
+        lastErr = new Error(`Fly LLM Connector (${llm.provider}/${model}) returned empty or incomplete code`);
+        continue;
+      }
+      const fence = rawContent.match(/```(?:js|javascript)?\s*([\s\S]*?)```/);
+      const patchedCode = (fence ? fence[1] : rawContent).trim() + '\n';
+
+      const syntax = validateJsSyntax(patchedCode);
+      if (
+        !syntax.valid ||
+        !patchedCode.includes("import { fileURLToPath } from 'node:url'") ||
+        !patchedCode.includes('app.listen')
+      ) {
+        lastErr = new Error(
+          `LLM (${data?.model || model}) produced invalid or incomplete server.js: ${syntax.error || 'missing required import fileURLToPath or app.listen'}`
+        );
+        continue;
+      }
+
+      return {
+        source: `fly-connector:${llm.provider}`,
+        model: data?.model || model,
+        latencyMs: Date.now() - t0,
+        summary: `Patched target-store/server.js live via ${data?.model || model} through Fly Zero-Secret Connector.`,
+        fixes: [
+          'CHECK-01: Enforced server catalog prices and quantity validation (400)',
+          'CHECK-02: Blocked stacked coupons (400) and serialized single-use coupons via BEGIN IMMEDIATE (409)',
+          'CHECK-03: Enforced admin RBAC on /api/admin/orders and /api/admin/refund (403)',
+          'CHECK-04: Enforced order ownership on /api/orders/:id (403)',
+          'CHECK-05: Added security headers (nosniff, SAMEORIGIN, CSP) and HttpOnly; SameSite=Lax cookies',
+        ],
+        patchedCode,
+        usage: data?.usage || null,
+      };
+    } catch (err) {
+      lastErr = err;
     }
   }
 
-  if (appliedCount === 0) {
-    throw new Error(`LLM (${res.model}) edits did not match target-store/server.js`);
-  }
-
-  const syntax = validateJsSyntax(patchedCode);
-  if (!syntax.valid) {
-    throw new Error(`LLM (${res.model}) produced invalid JS syntax: ${syntax.error}`);
-  }
-
-  return {
-    source: res.source,
-    model: res.model,
-    latencyMs: res.latencyMs,
-    summary: res.summary,
-    fixes: res.fixes,
-    patchedCode,
-    usage: res.usage,
-  };
+  throw lastErr || new Error(`Fly LLM Connector (${llm.provider}) failed`);
 }
 
 /**

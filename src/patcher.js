@@ -325,15 +325,17 @@ export async function applyPatch({
   let patchResult = null;
 
   if (!forceReference) {
-    try {
-      patchResult = await generatePatchViaLlmConnector({
-        vulnerableCode: beforeCode,
-        qaFindings: qaReport?.checks || [],
-        previousError,
-      });
-    } catch (err) {
-      patchResult = null;
-      previousError = err.message;
+    for (let attempt = 1; attempt <= 2 && !patchResult; attempt += 1) {
+      try {
+        patchResult = await generatePatchViaLlmConnector({
+          vulnerableCode: beforeCode,
+          qaFindings: qaReport?.checks || [],
+          previousError,
+        });
+      } catch (err) {
+        patchResult = null;
+        previousError = err.message;
+      }
     }
   }
 
@@ -362,7 +364,30 @@ export async function applyPatch({
   fs.writeFileSync(TARGET_SERVER_PATH, patchResult.patchedCode, 'utf8');
 
   if (typeof hooks.startStore === 'function') {
-    await hooks.startStore();
+    try {
+      await hooks.startStore();
+    } catch (bootErr) {
+      // If an LLM-generated patch failed to boot at runtime, cleanly fall back to verified reference
+      if (patchResult.source !== 'local-deterministic-verifier') {
+        if (typeof hooks.stopStore === 'function') {
+          try { await hooks.stopStore(); } catch {}
+        }
+        patchResult = {
+          source: 'local-deterministic-verifier',
+          model: 'patchguard-reference-v1',
+          summary: 'Recovered from LLM boot failure with verified reference security patch.',
+          fixes: [
+            'CHECK-01..05 verified hardening applied after runtime boot guard rollback',
+          ],
+          patchedCode: buildReferencePatchedServer(),
+          fallbackReason: `LLM patch failed store boot: ${bootErr.message}`,
+        };
+        fs.writeFileSync(TARGET_SERVER_PATH, patchResult.patchedCode, 'utf8');
+        await hooks.startStore();
+      } else {
+        throw bootErr;
+      }
+    }
   }
 
   const diffStats = computeUnifiedDiff(beforeCode, patchResult.patchedCode);
