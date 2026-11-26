@@ -2,6 +2,9 @@
 
 Built for **Fly.io Hacksgiving 2026** — running natively on **Fly.io Sprites**, **Copy-on-Write Checkpoints (~1s)**, and **Zero-Secret Connectors**.
 
+- **Live Fly.io Sprite:** https://patchguard-b6xzj.sprites.app
+- **Source Code:** https://github.com/Inova117/patchguard-hacksgiving
+
 ---
 
 ## Why This Cannot Be Done With a Chat Prompt

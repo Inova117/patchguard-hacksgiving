@@ -166,7 +166,7 @@ export async function testConnectorGuardrails() {
     try {
       const r = await fetch(url, { signal: AbortSignal.timeout(7000) });
       probes.push({
-        name: `LLM Connector Probe (${llm.provider})`,
+        name: `LLM ALLOW ${probePath} (${llm.provider})`,
         target: url,
         expected: '200 OK (Zero-Secret AI Gateway)',
         status: r.status,
@@ -175,6 +175,24 @@ export async function testConnectorGuardrails() {
       });
     } catch (e) {
       probes.push({ name: `LLM Probe (${llm.provider})`, target: url, status: 0, passed: false, detail: e.message });
+    }
+
+    if (llm.provider === 'openrouter') {
+      const blockedLlmUrl = `${base}/v1/auth/key`;
+      const t3 = Date.now();
+      try {
+        const r = await fetch(blockedLlmUrl, { signal: AbortSignal.timeout(7000) });
+        probes.push({
+          name: 'OpenRouter BLOCK /v1/auth/key (Policy Enforced)',
+          target: blockedLlmUrl,
+          expected: '403 Forbidden — endpoint not allowed',
+          status: r.status,
+          latencyMs: Date.now() - t3,
+          passed: r.status === 403,
+        });
+      } catch (e) {
+        probes.push({ name: 'OpenRouter BLOCK /v1/auth/key', target: blockedLlmUrl, status: 0, passed: false, detail: e.message });
+      }
     }
   }
 
@@ -267,60 +285,76 @@ ${vulnerableCode}
 \`\`\``;
 
   const isOllama = llm.provider === 'ollama';
-  const model = isOllama
-    ? process.env.PATCHGUARD_OLLAMA_MODEL || 'qwen2.5-coder:32b'
-    : process.env.PATCHGUARD_OPENROUTER_MODEL || 'anthropic/claude-sonnet-4';
+  const candidateModels = isOllama
+    ? [process.env.PATCHGUARD_OLLAMA_MODEL || 'qwen2.5-coder:32b']
+    : [
+        process.env.PATCHGUARD_OPENROUTER_MODEL || 'google/gemma-4-31b-it:free',
+        'openrouter/free',
+      ];
 
   const base = llm.gatewayBaseUrl.endsWith('/v1') && !isOllama
     ? llm.gatewayBaseUrl.slice(0, -3)
     : llm.gatewayBaseUrl;
   const endpoint = isOllama ? `${base}/api/chat` : `${base}/v1/chat/completions`;
 
-  const body = isOllama
-    ? {
-        model,
-        stream: false,
-        format: 'json',
-        messages: [{ role: 'user', content: prompt }],
-      }
-    : {
-        model,
-        temperature: 0.1,
-        messages: [{ role: 'user', content: prompt }],
-      };
+  let lastErr = null;
+  for (const model of candidateModels) {
+    const body = isOllama
+      ? {
+          model,
+          stream: false,
+          format: 'json',
+          messages: [{ role: 'user', content: prompt }],
+        }
+      : {
+          model,
+          temperature: 0.1,
+          max_tokens: 8000,
+          messages: [{ role: 'user', content: prompt }],
+        };
 
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(45000),
-  });
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(55000),
+    });
 
-  if (!res.ok) {
-    throw new Error(`Fly LLM Connector (${llm.provider}) returned HTTP ${res.status}`);
+    if (!res.ok) {
+      lastErr = new Error(`Fly LLM Connector (${llm.provider}/${model}) returned HTTP ${res.status}`);
+      continue;
+    }
+
+    const data = await res.json();
+    const content = isOllama ? data?.message?.content : data?.choices?.[0]?.message?.content;
+    if (!content) {
+      lastErr = new Error(`Fly LLM Connector (${llm.provider}/${model}) returned empty content`);
+      continue;
+    }
+    const parsed = extractJsonObject(content);
+
+    if (!parsed?.patched_code || typeof parsed.patched_code !== 'string') {
+      lastErr = new Error(`LLM Connector (${model}) JSON missing patched_code`);
+      continue;
+    }
+
+    const syntax = validateJsSyntax(parsed.patched_code);
+    if (!syntax.valid) {
+      lastErr = new Error(`LLM (${model}) generated invalid JS syntax: ${syntax.error}`);
+      continue;
+    }
+
+    return {
+      source: `fly-connector:${llm.provider}`,
+      model: data?.model || model,
+      summary: parsed.summary || 'Patched server.js via Fly Zero-Secret LLM Connector',
+      fixes: Array.isArray(parsed.fixes) ? parsed.fixes : [],
+      patchedCode: parsed.patched_code,
+      usage: data?.usage || null,
+    };
   }
 
-  const data = await res.json();
-  const content = isOllama ? data?.message?.content : data?.choices?.[0]?.message?.content;
-  const parsed = extractJsonObject(content);
-
-  if (!parsed?.patched_code || typeof parsed.patched_code !== 'string') {
-    throw new Error('LLM Connector JSON missing patched_code');
-  }
-
-  const syntax = validateJsSyntax(parsed.patched_code);
-  if (!syntax.valid) {
-    throw new Error(`LLM generated invalid JS syntax: ${syntax.error}`);
-  }
-
-  return {
-    source: `fly-connector:${llm.provider}`,
-    model,
-    summary: parsed.summary || 'Patched server.js via Fly Zero-Secret LLM Connector',
-    fixes: Array.isArray(parsed.fixes) ? parsed.fixes : [],
-    patchedCode: parsed.patched_code,
-    usage: data?.usage || null,
-  };
+  throw lastErr || new Error(`Fly LLM Connector (${llm.provider}) failed`);
 }
 
 /**

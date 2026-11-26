@@ -26,6 +26,9 @@ function commandExists(bin) {
 }
 
 export function isFlySpriteEnv() {
+  if (process.env.PATCHGUARD_FORCE_LOCAL_SNAPSHOT === '1') {
+    return false;
+  }
   return commandExists('sprite-env') || fs.existsSync('/.sprite');
 }
 
@@ -142,21 +145,39 @@ export async function listCheckpoints() {
       const { stdout } = await execFileAsync('sprite-env', ['checkpoints', 'list']);
       const metaById = new Map(meta.checkpoints.map((c) => [c.id, c]));
       const items = [];
-      const lines = stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      let parsedJson = null;
+      try {
+        parsedJson = JSON.parse(stdout);
+      } catch {}
 
-      for (const line of lines) {
-        if (/^(ID|NAME|---)/i.test(line)) continue;
-        const m = line.match(/\b(v\d+|auto-[\w-]+)\b/);
-        if (m) {
-          const id = m[1];
-          const known = metaById.get(id);
+      if (Array.isArray(parsedJson)) {
+        for (const row of parsedJson) {
+          if (!row?.id || row.id === 'Current') continue;
+          const known = metaById.get(row.id);
           items.push({
-            id,
-            comment: known?.comment || line,
+            id: String(row.id),
+            comment: row.comment || known?.comment || 'Sprite CoW Checkpoint',
             mode: 'fly-sprite-cow',
-            createdAt: known?.createdAt || null,
+            createdAt: row.create_time || known?.createdAt || null,
             dbHash: known?.dbHash || null,
           });
+        }
+      } else {
+        const lines = stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+        for (const line of lines) {
+          if (/^(ID|NAME|---)/i.test(line)) continue;
+          const m = line.match(/\b(v\d+|auto-[\w-]+)\b/);
+          if (m) {
+            const id = m[1];
+            const known = metaById.get(id);
+            items.push({
+              id,
+              comment: known?.comment || line,
+              mode: 'fly-sprite-cow',
+              createdAt: known?.createdAt || null,
+              dbHash: known?.dbHash || null,
+            });
+          }
         }
       }
       if (items.length > 0) {

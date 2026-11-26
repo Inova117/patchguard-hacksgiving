@@ -26,4 +26,4 @@
 > Instead of asking an LLM to "guess" bugs from text, PatchGuard lives in a Fly Sprite, boots our store + headless Chromium, proves real checkout & access-control leaks (`$1,299 -> $0.01`) with screenshots, time-travels the dirty Linux disk back in ~1s via CoW Checkpoints, generates a patch via Zero-Secret Connectors (0 API keys on disk, `/user/keys` blocked `403`), re-verifies 6/6 in Chromium, and opens a verified GitHub PR.
 >
 > Code: https://github.com/Inova117/patchguard-hacksgiving
-> Live Sprite: <your-sprite-url>
+> Live Sprite: https://patchguard-b6xzj.sprites.app

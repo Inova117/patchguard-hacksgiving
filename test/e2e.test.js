@@ -6,6 +6,7 @@ import { after, before, test } from 'node:test';
 // Configure isolated test ports before importing PatchGuard modules
 process.env.PORT = '18080';
 process.env.STORE_PORT = '14100';
+process.env.PATCHGUARD_FORCE_LOCAL_SNAPSHOT = '1';
 
 const { TARGET_DB_PATH, TARGET_SERVER_PATH, assertLocalTargetUrl } = await import('../src/config.js');
 const { bootPatchGuard, shutdownPatchGuard } = await import('../src/server.js');
