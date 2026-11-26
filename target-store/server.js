@@ -13,6 +13,14 @@ const db = initDb(DB_PATH);
 const sessions = new Map();
 const app = express();
 
+app.disable('x-powered-by');
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Content-Security-Policy', "default-src 'self' 'unsafe-inline'; frame-ancestors 'self'; img-src 'self' data:");
+  next();
+});
+
 app.use(express.json({ limit: '256kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -64,8 +72,7 @@ app.post('/api/login', (req, res) => {
   const sid = crypto.randomBytes(16).toString('hex');
   sessions.set(sid, user);
 
-  // NOTE: Missing HttpOnly and SameSite flags in initial build
-  res.setHeader('Set-Cookie', `pm_session=${encodeURIComponent(sid)}; Path=/`);
+  res.setHeader('Set-Cookie', `pm_session=${encodeURIComponent(sid)}; Path=/; HttpOnly; SameSite=Lax`);
   return res.json({ user });
 });
 
@@ -74,7 +81,7 @@ app.post('/api/logout', (req, res) => {
   if (cookies.pm_session) {
     sessions.delete(cookies.pm_session);
   }
-  res.setHeader('Set-Cookie', 'pm_session=; Path=/; Max-Age=0');
+  res.setHeader('Set-Cookie', 'pm_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax');
   return res.json({ ok: true });
 });
 
@@ -105,10 +112,15 @@ app.post('/api/checkout', (req, res) => {
     if (!product) {
       return res.status(404).json({ error: `Unknown product ${item.productId}` });
     }
-    const qty = Number(item.qty || 1);
-    // BUG 1: Trusts client-supplied unit_price_cents instead of enforcing catalog price_cents
-    const unitPriceCents =
-      typeof item.unit_price_cents === 'number' ? item.unit_price_cents : product.price_cents;
+    const qty = Number(item.qty ?? 1);
+    if (!Number.isInteger(qty) || qty <= 0 || qty > product.stock) {
+      return res.status(400).json({ error: `Invalid quantity for ${product.name}` });
+    }
+    if (typeof item.unit_price_cents === 'number' && item.unit_price_cents !== product.price_cents) {
+      return res.status(400).json({ error: 'Client unit price mismatch rejected; server enforces catalog price' });
+    }
+    // Always enforce canonical catalog price from SQLite
+    const unitPriceCents = product.price_cents;
     subtotalCents += unitPriceCents * qty;
     lineItems.push({
       productId: product.id,
@@ -118,58 +130,71 @@ app.post('/api/checkout', (req, res) => {
     });
   }
 
-  const requestedCoupons = Array.isArray(coupons) && coupons.length > 0
+  const rawCoupons = Array.isArray(coupons) && coupons.length > 0
     ? coupons
     : couponCode
       ? [couponCode]
       : [];
+  const normalizedCoupons = rawCoupons.map((c) => String(c).trim().toUpperCase()).filter(Boolean);
+
+  if (normalizedCoupons.length > 1 || new Set(normalizedCoupons).size !== normalizedCoupons.length) {
+    return res.status(400).json({ error: 'Coupon stacking or duplicate coupon codes are not allowed' });
+  }
 
   let totalDiscountPct = 0;
-  // BUG 2: Stacks repeated coupon codes and performs non-atomic usage check
-  for (const code of requestedCoupons) {
-    const row = db
-      .prepare('SELECT code, discount_pct, max_uses, times_used FROM coupons WHERE code = ?')
-      .get(String(code).toUpperCase());
-    if (!row) {
-      return res.status(400).json({ error: `Invalid coupon ${code}` });
+  let appliedCoupon = null;
+
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    if (normalizedCoupons.length === 1) {
+      const code = normalizedCoupons[0];
+      const row = db
+        .prepare('SELECT code, discount_pct, max_uses, times_used FROM coupons WHERE code = ?')
+        .get(code);
+      if (!row) {
+        db.exec('ROLLBACK');
+        return res.status(400).json({ error: `Invalid coupon ${code}` });
+      }
+      const updateRes = db
+        .prepare('UPDATE coupons SET times_used = times_used + 1 WHERE code = ? AND times_used < max_uses')
+        .run(code);
+      if (updateRes.changes !== 1) {
+        db.exec('ROLLBACK');
+        return res.status(409).json({ error: `Coupon ${code} already exhausted` });
+      }
+      totalDiscountPct = Math.min(row.discount_pct, 50);
+      appliedCoupon = code;
     }
-    if (row.times_used >= row.max_uses) {
-      return res.status(409).json({ error: `Coupon ${row.code} already exhausted` });
-    }
-    totalDiscountPct += row.discount_pct;
+
+    const discountCents = Math.round((subtotalCents * totalDiscountPct) / 100);
+    const totalCents = Math.max(0, subtotalCents - discountCents);
+
+    const info = db
+      .prepare(
+        `INSERT INTO orders
+         (user_id, items_json, coupon_code, subtotal_cents, discount_cents, total_cents, status, shipping_note, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'paid', ?, ?)`
+      )
+      .run(
+        req.user.id,
+        JSON.stringify(lineItems),
+        appliedCoupon,
+        subtotalCents,
+        discountCents,
+        totalCents,
+        `Order by ${req.user.username}`,
+        new Date().toISOString()
+      );
+
+    db.exec('COMMIT');
+    const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(Number(info.lastInsertRowid));
+    return res.status(201).json({ order, dbHash: computeDbHash(DB_PATH) });
+  } catch (err) {
+    try {
+      db.exec('ROLLBACK');
+    } catch {}
+    return res.status(500).json({ error: 'Checkout failed', detail: err.message });
   }
-
-  const clampedPct = Math.min(totalDiscountPct, 100);
-  const discountCents = Math.round((subtotalCents * clampedPct) / 100);
-  const totalCents = Math.max(0, subtotalCents - discountCents);
-
-  if (requestedCoupons.length > 0) {
-    const uniqueCodes = [...new Set(requestedCoupons.map((c) => String(c).toUpperCase()))];
-    const incStmt = db.prepare('UPDATE coupons SET times_used = times_used + 1 WHERE code = ?');
-    for (const c of uniqueCodes) {
-      incStmt.run(c);
-    }
-  }
-
-  const info = db
-    .prepare(
-      `INSERT INTO orders
-       (user_id, items_json, coupon_code, subtotal_cents, discount_cents, total_cents, status, shipping_note, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'paid', ?, ?)`
-    )
-    .run(
-      req.user.id,
-      JSON.stringify(lineItems),
-      requestedCoupons.join(',') || null,
-      subtotalCents,
-      discountCents,
-      totalCents,
-      `Order by ${req.user.username}`,
-      new Date().toISOString()
-    );
-
-  const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(Number(info.lastInsertRowid));
-  return res.status(201).json({ order, dbHash: computeDbHash(DB_PATH) });
 });
 
 app.get('/api/orders', (req, res) => {
@@ -187,18 +212,22 @@ app.get('/api/orders/:id', (req, res) => {
     return res.status(401).json({ error: 'Authentication required' });
   }
   const orderId = Number(req.params.id);
-  // BUG 4: Missing ownership check (order.user_id === req.user.id || req.user.role === 'admin')
   const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
   if (!order) {
     return res.status(404).json({ error: 'Order not found' });
+  }
+  if (order.user_id !== req.user.id && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden: you do not own this order' });
   }
   return res.json({ order });
 });
 
 app.get('/api/admin/orders', (req, res) => {
-  // BUG 3: Checks authentication only; missing req.user.role === 'admin' check
   if (!req.user) {
     return res.status(401).json({ error: 'Authentication required' });
+  }
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden: admin role required' });
   }
   const orders = db
     .prepare(
@@ -211,9 +240,11 @@ app.get('/api/admin/orders', (req, res) => {
 });
 
 app.post('/api/admin/refund', (req, res) => {
-  // BUG 3: Checks authentication only; missing req.user.role === 'admin' check
   if (!req.user) {
     return res.status(401).json({ error: 'Authentication required' });
+  }
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden: admin role required' });
   }
   const orderId = Number((req.body || {}).orderId);
   const existing = db.prepare('SELECT id FROM orders WHERE id = ?').get(orderId);
