@@ -127,16 +127,15 @@
 
         <div class="tab-panel active" id="tab-repo">
           <div class="panel-actions">
-            <input id="repoUrlInput" value="https://github.com/Inova117/indumatic-demo" placeholder="https://github.com/owner/repo" style="flex:1;" />
+            <input id="repoUrlInput" value="https://github.com/Inova117/patchguard-hacksgiving" placeholder="https://github.com/owner/public-repo" style="flex:1;" />
             <button class="btn sm primary" id="auditRepoBtn">1. Audit Real Repo</button>
             <button class="btn sm" id="healRepoBtn">2. AI Self-Heal (Zero-Secret LLM)</button>
             <button class="btn sm" id="prRepoBtn">3. Open GitHub PR</button>
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
-            <span class="muted">Real repos:</span>
-            <button class="btn sm repo-preset" data-url="https://github.com/Inova117/indumatic-demo">indumatic-demo (Vite)</button>
-            <button class="btn sm repo-preset" data-url="https://github.com/Inova117/zerioncrm">zerioncrm (Vite+Vitest)</button>
-            <button class="btn sm repo-preset" data-url="https://github.com/Inova117/Trivento">Trivento (TanStack)</button>
+            <span class="muted">Quick public targets:</span>
+            <button class="btn sm repo-preset" data-url="https://github.com/Inova117/patchguard-hacksgiving">patchguard-hacksgiving (This Repo)</button>
+            <button class="btn sm repo-preset" data-url="https://github.com/vitejs/vite-plugin-react">vitejs/vite-plugin-react (OSS)</button>
           </div>
           <div id="repoVisualSummary" class="vault-box" style="margin-bottom:10px;">
             <span class="muted">Paste any real GitHub repo → PatchGuard clones it inside the Fly Sprite, runs <code>npm install</code>, <code>npm audit</code> (real CVEs), static scan, build/tests, boots the app in live Chromium, patches it via Zero-Secret LLM, re-verifies, and opens a GitHub PR.</span>
