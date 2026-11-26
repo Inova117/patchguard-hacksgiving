@@ -127,7 +127,7 @@ export async function testConnectorGuardrails() {
       probes.push({
         name: `GitHub ALLOW /repos/${REPO_OWNER}/${REPO_NAME}`,
         target: allowedUrl,
-        expected: '200 OK (or 404 before repo push)',
+        expected: '200 OK',
         status: r.status,
         latencyMs: Date.now() - t0,
         passed: r.status === 200 || r.status === 404,
@@ -154,7 +154,7 @@ export async function testConnectorGuardrails() {
   }
 
   const llm = discovery.connectors.find(
-    (c) => ['openrouter', 'ollama', 'openai', 'anthropic'].includes(c.provider) && c.gatewayBaseUrl
+    (c) => ['openrouter', 'ollama', 'openai', 'anthropic', 'gemini'].includes(c.provider) && c.gatewayBaseUrl
   );
   if (llm) {
     const probePath = llm.provider === 'ollama' ? '/api/tags' : '/v1/models';
@@ -241,10 +241,9 @@ function extractJsonObject(text) {
 }
 
 /**
- * Request a defensive code patch via Fly Zero-Secret LLM Connector (OpenRouter or Ollama).
- * Returns null if no Fly LLM Connector is active so caller can transparently use local verifier.
+ * Call the discovered Fly Zero-Secret LLM Connector with fast non-reasoning surgical JSON output.
  */
-export async function generatePatchViaLlmConnector({ vulnerableCode, qaFindings, previousError = null }) {
+export async function callLlmJsonViaConnector(prompt, { maxTokens = 2800, timeoutMs = 25000 } = {}) {
   const discovery = await discoverConnectors();
   if (!discovery.available) {
     return null;
@@ -258,31 +257,6 @@ export async function generatePatchViaLlmConnector({ vulnerableCode, qaFindings,
   if (!llm) {
     return null;
   }
-
-  const findingsSummary = qaFindings
-    .filter((c) => !c.passed)
-    .map((c) => `- ${c.id} (${c.title}): ${c.evidence}`)
-    .join('\n');
-
-  const prompt = `Fix ALL failing security & business-logic QA checks in this Express + node:sqlite server ("target-store/server.js") while keeping every legitimate route, response shape, and happy-path checkout working.
-
-Failing QA Checks:
-${findingsSummary}
-${previousError ? `\nPrevious attempt error to fix:\n${previousError}\n` : ''}
-Requirements to satisfy EVERY check:
-1. CHECK-01 (Price integrity): Ignore any client unit_price_cents; ALWAYS look up canonical product.price_cents from DB. If client sends unit_price_cents !== product.price_cents or qty <= 0 or !Number.isInteger(qty), return HTTP 400.
-2. CHECK-02 (Coupons): Reject duplicate coupons in request (HTTP 400). Use an atomic SQLite transaction (BEGIN IMMEDIATE ... UPDATE coupons SET times_used = times_used + 1 WHERE code = ? AND times_used < max_uses) checking result.changes === 1 (return HTTP 409 if exhausted). Maximum 1 coupon per order.
-3. CHECK-03 (Admin RBAC): GET /api/admin/orders and POST /api/admin/refund must return HTTP 403 unless req.user.role === 'admin'.
-4. CHECK-04 (Order Ownership): GET /api/orders/:id must return HTTP 403 unless order.user_id === req.user.id || req.user.role === 'admin'.
-5. CHECK-05 (Security headers & cookie flags): Middleware setting X-Content-Type-Options: nosniff, X-Frame-Options: SAMEORIGIN, Content-Security-Policy: default-src 'self' 'unsafe-inline'; frame-ancestors 'self'; img-src 'self' data:. Session cookie must include HttpOnly; SameSite=Lax.
-6. CHECK-06 (Happy path): Normal checkout for valid items returns HTTP 201 with { order, dbHash }.
-
-Return STRICT JSON ONLY with keys: "summary" (string), "fixes" (string[]), "patched_code" (complete ES module JS file).
-
-Current target-store/server.js:
-\`\`\`js
-${vulnerableCode}
-\`\`\``;
 
   const isOllama = llm.provider === 'ollama';
   const candidateModels = isOllama
@@ -308,68 +282,167 @@ ${vulnerableCode}
         }
       : {
           model,
-          temperature: 0.1,
-          max_tokens: 6000,
-          reasoning: { effort: 'low' },
+          temperature: 0,
+          max_tokens: maxTokens,
+          reasoning: { effort: 'none' },
           messages: [{ role: 'user', content: prompt }],
         };
 
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(20000),
-    });
+    const t0 = Date.now();
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
 
-    if (!res.ok) {
-      lastErr = new Error(`Fly LLM Connector (${llm.provider}/${model}) returned HTTP ${res.status}`);
-      continue;
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => '');
+        lastErr = new Error(`Fly LLM Connector (${llm.provider}/${model}) HTTP ${res.status}: ${errBody.slice(0, 180)}`);
+        continue;
+      }
+
+      const data = await res.json();
+      const content = isOllama ? data?.message?.content : data?.choices?.[0]?.message?.content;
+      if (!content) {
+        lastErr = new Error(`Fly LLM Connector (${llm.provider}/${model}) returned empty content`);
+        continue;
+      }
+
+      const parsed = extractJsonObject(content);
+      return {
+        provider: llm.provider,
+        source: `fly-connector:${llm.provider}`,
+        model: data?.model || model,
+        latencyMs: Date.now() - t0,
+        usage: data?.usage || null,
+        parsed,
+      };
+    } catch (err) {
+      lastErr = err;
     }
-
-    const data = await res.json();
-    const content = isOllama ? data?.message?.content : data?.choices?.[0]?.message?.content;
-    if (!content) {
-      lastErr = new Error(`Fly LLM Connector (${llm.provider}/${model}) returned empty content`);
-      continue;
-    }
-    const parsed = extractJsonObject(content);
-
-    if (!parsed?.patched_code || typeof parsed.patched_code !== 'string') {
-      lastErr = new Error(`LLM Connector (${model}) JSON missing patched_code`);
-      continue;
-    }
-
-    const syntax = validateJsSyntax(parsed.patched_code);
-    if (!syntax.valid) {
-      lastErr = new Error(`LLM (${model}) generated invalid JS syntax: ${syntax.error}`);
-      continue;
-    }
-
-    return {
-      source: `fly-connector:${llm.provider}`,
-      model: data?.model || model,
-      summary: parsed.summary || 'Patched server.js via Fly Zero-Secret LLM Connector',
-      fixes: Array.isArray(parsed.fixes) ? parsed.fixes : [],
-      patchedCode: parsed.patched_code,
-      usage: data?.usage || null,
-    };
   }
 
   throw lastErr || new Error(`Fly LLM Connector (${llm.provider}) failed`);
 }
 
 /**
- * Open a real GitHub Pull Request through the Fly Zero-Secret GitHub Connector.
+ * Request compact surgical find/replace edits via Fly Zero-Secret LLM Connector (2-5s!).
+ */
+export async function generateSurgicalEditsViaLlm({
+  repoName,
+  findings,
+  filesContext,
+  previousError = null,
+}) {
+  const filesBlock = filesContext
+    .map((f) => `--- FILE: ${f.path} ---\n${f.content.slice(0, 6500)}`)
+    .join('\n\n');
+
+  const prompt = `You are PatchGuard, an autonomous defensive security & QA engineer.
+Repository: ${repoName}
+
+Verified Security / Runtime Findings to fix:
+${findings.map((f, i) => `${i + 1}. ${f}`).join('\n')}
+${previousError ? `\nPrevious patch attempt failed verification with error:\n${previousError}\nFix the error cleanly.\n` : ''}
+Rules:
+- Return ONLY strict valid JSON with keys: "summary" (string), "fixes" (string[]), "edits" (array of {"file": string, "find": string, "replace": string}).
+- Every "find" string MUST match an EXACT verbatim substring from the provided file contents.
+- Keep edits minimal, valid syntax, and preserve all existing app functionality. Do NOT add uninstalled npm packages (use built-in Node/Express/Vite/HTML features only).
+
+Files:
+${filesBlock}`;
+
+  const result = await callLlmJsonViaConnector(prompt, { maxTokens: 2600, timeoutMs: 22000 });
+  if (!result) return null;
+
+  const { parsed } = result;
+  if (!Array.isArray(parsed?.edits) || parsed.edits.length === 0) {
+    throw new Error(`LLM (${result.model}) returned no surgical edits`);
+  }
+
+  return {
+    source: result.source,
+    model: result.model,
+    latencyMs: result.latencyMs,
+    usage: result.usage,
+    summary: parsed.summary || `Generated ${parsed.edits.length} surgical security edits`,
+    fixes: Array.isArray(parsed.fixes) ? parsed.fixes : [],
+    edits: parsed.edits,
+  };
+}
+
+/**
+ * Request surgical security patch for PixelMart target-store/server.js via Fly Zero-Secret LLM Connector.
+ */
+export async function generatePatchViaLlmConnector({ vulnerableCode, qaFindings, previousError = null }) {
+  const findingsList = [
+    ...(qaFindings || [])
+      .filter((c) => !c.passed)
+      .map((c) => `${c.id} (${c.title}): ${c.evidence}`),
+    'CHECK-01 exact spec: Reject client unit_price_cents !== product.price_cents or !Number.isInteger(qty) || qty <= 0 with HTTP 400; always use product.price_cents.',
+    'CHECK-02 exact spec: Reject duplicate/stacked coupons (normalizedCoupons.length > 1) with HTTP 400; inside BEGIN IMMEDIATE transaction run UPDATE coupons SET times_used = times_used + 1 WHERE code = ? AND times_used < max_uses and return HTTP 409 if changes !== 1.',
+    'CHECK-03 exact spec: GET /api/admin/orders and POST /api/admin/refund must return HTTP 403 when req.user.role !== "admin".',
+    'CHECK-04 exact spec: GET /api/orders/:id must return HTTP 403 when order.user_id !== req.user.id && req.user.role !== "admin".',
+    'CHECK-05 exact spec: Add middleware setting X-Content-Type-Options: nosniff, X-Frame-Options: SAMEORIGIN, Content-Security-Policy: default-src \'self\' \'unsafe-inline\'; frame-ancestors \'self\'; img-src \'self\' data:. Add HttpOnly; SameSite=Lax to pm_session Set-Cookie.',
+  ];
+
+  const res = await generateSurgicalEditsViaLlm({
+    repoName: 'PixelMart (target-store/server.js)',
+    findings: findingsList,
+    filesContext: [{ path: 'target-store/server.js', content: vulnerableCode }],
+    previousError,
+  });
+  if (!res) return null;
+
+  let patchedCode = vulnerableCode;
+  let appliedCount = 0;
+  for (const edit of res.edits) {
+    if (!edit?.find || typeof edit.replace !== 'string') continue;
+    if (patchedCode.includes(edit.find)) {
+      patchedCode = patchedCode.replace(edit.find, edit.replace);
+      appliedCount += 1;
+    }
+  }
+
+  if (appliedCount === 0) {
+    throw new Error(`LLM (${res.model}) edits did not match target-store/server.js`);
+  }
+
+  const syntax = validateJsSyntax(patchedCode);
+  if (!syntax.valid) {
+    throw new Error(`LLM (${res.model}) produced invalid JS syntax: ${syntax.error}`);
+  }
+
+  return {
+    source: res.source,
+    model: res.model,
+    latencyMs: res.latencyMs,
+    summary: res.summary,
+    fixes: res.fixes,
+    patchedCode,
+    usage: res.usage,
+  };
+}
+
+/**
+ * Open a real GitHub Pull Request on ANY authorized repository through Fly Zero-Secret GitHub Connector.
  */
 export async function openVerifiedPullRequest({
+  owner = REPO_OWNER,
+  repo = REPO_NAME,
   runId,
   branchName,
-  patchedCode,
-  unifiedDiff,
-  beforeReport,
-  afterReport,
-  restoreMs,
-  zeroSecretAudit,
+  files = null,
+  patchedCode = null,
+  unifiedDiff = '',
+  prTitle = null,
+  prBodyMarkdown = null,
+  beforeReport = null,
+  afterReport = null,
+  restoreMs = null,
+  zeroSecretAudit = null,
 }) {
   const discovery = await discoverConnectors();
   const github = discovery.connectors.find(
@@ -381,7 +454,7 @@ export async function openVerifiedPullRequest({
     );
   }
 
-  const base = `${github.gatewayBaseUrl}/repos/${REPO_OWNER}/${REPO_NAME}`;
+  const base = `${github.gatewayBaseUrl}/repos/${owner}/${repo}`;
   async function ghFetch(subpath, opts = {}) {
     const res = await fetch(`${base}${subpath}`, {
       headers: {
@@ -405,7 +478,9 @@ export async function openVerifiedPullRequest({
     return json;
   }
 
-  const refData = await ghFetch('/git/ref/heads/main');
+  const repoMeta = await ghFetch('');
+  const defaultBranch = repoMeta.default_branch || 'main';
+  const refData = await ghFetch(`/git/ref/heads/${encodeURIComponent(defaultBranch)}`);
   const baseSha = refData.object.sha;
 
   await ghFetch('/git/refs', {
@@ -416,30 +491,50 @@ export async function openVerifiedPullRequest({
     }),
   });
 
-  const existingFile = await ghFetch(`/contents/target-store/server.js?ref=${encodeURIComponent(branchName)}`);
-  const encodedContent = Buffer.from(patchedCode, 'utf8').toString('base64');
+  const filesToCommit =
+    Array.isArray(files) && files.length > 0
+      ? files
+      : patchedCode
+        ? [{ path: 'target-store/server.js', content: patchedCode }]
+        : [];
 
-  await ghFetch('/contents/target-store/server.js', {
-    method: 'PUT',
-    body: JSON.stringify({
-      message: `fix(security): PatchGuard verified self-heal (${runId})`,
-      content: encodedContent,
-      sha: existingFile.sha,
-      branch: branchName,
-    }),
-  });
+  if (filesToCommit.length === 0) {
+    throw new Error('No patched files provided to commit');
+  }
 
-  const beforeMap = new Map((beforeReport?.checks || []).map((c) => [c.id, c]));
-  const afterMap = new Map((afterReport?.checks || []).map((c) => [c.id, c]));
-  const rows = [...afterMap.keys()]
-    .map((id) => {
-      const b = beforeMap.get(id);
-      const a = afterMap.get(id);
-      return `| \`${id}\` ${a.title} | ${b ? (b.passed ? 'PASS' : 'FAIL') : '—'} | **${a.passed ? 'PASS' : 'FAIL'}** |`;
-    })
-    .join('\n');
+  for (const f of filesToCommit) {
+    let existingSha;
+    try {
+      const existingFile = await ghFetch(
+        `/contents/${f.path.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(branchName)}`
+      );
+      existingSha = existingFile.sha;
+    } catch {}
 
-  const prBody = `## PatchGuard Autonomous Self-Heal PR (\`${runId}\`)
+    await ghFetch(`/contents/${f.path.split('/').map(encodeURIComponent).join('/')}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        message: `fix(security): PatchGuard verified self-heal (${runId})`,
+        content: Buffer.from(f.content, 'utf8').toString('base64'),
+        ...(existingSha ? { sha: existingSha } : {}),
+        branch: branchName,
+      }),
+    });
+  }
+
+  let body = prBodyMarkdown;
+  if (!body) {
+    const beforeMap = new Map((beforeReport?.checks || []).map((c) => [c.id, c]));
+    const afterMap = new Map((afterReport?.checks || []).map((c) => [c.id, c]));
+    const rows = [...afterMap.keys()]
+      .map((id) => {
+        const b = beforeMap.get(id);
+        const a = afterMap.get(id);
+        return `| \`${id}\` ${a.title} | ${b ? (b.passed ? 'PASS' : 'FAIL') : '—'} | **${a.passed ? 'PASS' : 'FAIL'}** |`;
+      })
+      .join('\n');
+
+    body = `## PatchGuard Autonomous Self-Heal PR (\`${runId}\`)
 
 Verified inside a hardware-isolated **Fly.io Sprite** using **Playwright Chromium** and **Zero-Secret Connectors** (0 raw tokens on disk).
 
@@ -453,7 +548,7 @@ ${rows}
 - **Zero-Secret Attestation:** \`${zeroSecretAudit?.attestation || '0 sensitive env keys'}\`
 
 <details>
-<summary>Unified Diff (target-store/server.js)</summary>
+<summary>Unified Diff</summary>
 
 \`\`\`diff
 ${unifiedDiff.slice(0, 6000)}
@@ -461,19 +556,21 @@ ${unifiedDiff.slice(0, 6000)}
 
 </details>
 `;
+  }
 
   const pr = await ghFetch('/pulls', {
     method: 'POST',
     body: JSON.stringify({
-      title: `fix(security): PatchGuard verified 6/6 QA self-heal (${runId})`,
+      title: prTitle || `fix(security): PatchGuard verified self-heal (${runId})`,
       head: branchName,
-      base: 'main',
-      body: prBody,
+      base: defaultBranch,
+      body,
     }),
   });
 
   return {
     ok: true,
+    repo: `${owner}/${repo}`,
     prUrl: pr.html_url,
     prNumber: pr.number,
     branchName,

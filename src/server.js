@@ -23,7 +23,7 @@ import {
 } from './connectors.js';
 import { applyPatch } from './patcher.js';
 import { runQaSuite } from './qa-engine.js';
-import { auditPublicRepo } from './repo-sandbox.js';
+import { auditPublicRepo, healPublicRepo } from './repo-sandbox.js';
 import {
   auditZeroSecrets,
   createCheckpoint,
@@ -50,6 +50,8 @@ const state = {
   latestGuardrailTest: null,
   latestPr: null,
   lastRestoreResult: null,
+  latestRepoAudit: null,
+  latestRepoHeal: null,
   logs: [],
 };
 
@@ -473,12 +475,92 @@ app.post('/api/pr/open', async (req, res) => {
 app.post('/api/repo/audit', async (req, res) => {
   try {
     const repoUrl = String(req.body?.repoUrl || '').trim();
-    emitLog('info', `Running sandboxed static hygiene audit on ${repoUrl}...`);
-    const audit = await auditPublicRepo(repoUrl);
-    emitLog('success', `Audited ${audit.repo}: ${audit.filesScanned} files, ${audit.findingsCount} findings`);
+    emitLog('info', `Starting FULL real-repo audit on ${repoUrl}...`);
+    const audit = await auditPublicRepo(repoUrl, {
+      onProgress: (msg) => emitLog('info', `[REPO] ${msg}`),
+    });
+    state.latestRepoAudit = audit;
+    state.latestRepoHeal = null;
+    emitLog(
+      'success',
+      `Audited ${audit.fullName} (${audit.framework}): ${audit.filesScanned} files, ${audit.cveAudit.total} CVEs, ${audit.staticFindingsCount} static, liveHeaders=${audit.liveBrowser?.headersPassed}`
+    );
     res.json(audit);
   } catch (err) {
     emitLog('error', `Repo audit failed: ${err.message}`);
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/repo/heal', async (req, res) => {
+  try {
+    const repoUrl = String(req.body?.repoUrl || '').trim();
+    emitLog('info', `Starting Zero-Secret LLM Self-Heal on real repo ${repoUrl}...`);
+    const heal = await healPublicRepo({
+      repoUrl,
+      previousAudit: state.latestRepoAudit?.fullName && repoUrl.includes(state.latestRepoAudit.fullName)
+        ? state.latestRepoAudit
+        : null,
+      onProgress: (msg) => emitLog('info', `[HEAL] ${msg}`),
+    });
+    state.latestRepoHeal = heal;
+    emitLog(
+      'success',
+      `Healed ${heal.fullName} via ${heal.llm.source} (${heal.llm.model}, ${heal.llm.latencyMs}ms): touched ${heal.touchedFiles.join(', ')}, afterMissingHeaders=${heal.after.missingHeaders.length}`
+    );
+    res.json(heal);
+  } catch (err) {
+    emitLog('error', `Repo self-heal failed: ${err.message}`);
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/repo/pr', async (req, res) => {
+  try {
+    const heal = state.latestRepoHeal;
+    if (!heal || !heal.committedFiles?.length) {
+      return res.status(400).json({ ok: false, error: 'Run "AI Self-Heal" on a real repo before opening a PR' });
+    }
+    const runId = `repo-${Date.now()}`;
+    const branchName = req.body?.branchName || `patchguard/harden-${Date.now()}`;
+    const body = `## PatchGuard Real-Repo Autonomous Self-Heal (\`${heal.fullName}\`)
+
+Audited, patched, built, and re-verified live inside a **Fly.io Sprite** using **Playwright Chromium** and **Zero-Secret Connectors**.
+
+- **LLM Connector:** \`${heal.llm.source}\` (\`${heal.llm.model}\`, \`${heal.llm.latencyMs}ms\`)
+- **Files Patched:** ${heal.touchedFiles.map((f) => `\`${f}\``).join(', ')}
+- **Live Missing Security Headers:** \`${heal.before.missingHeaders.length}\` → **\`${heal.after.missingHeaders.length}\`**
+- **Build Verification:** \`${heal.after.buildAndTest?.build ? (heal.after.buildAndTest.build.ok ? 'PASS' : 'FAIL') : 'N/A'}\`
+- **Zero-Secret Attestation:** \`${auditZeroSecrets().attestation}\`
+
+### Summary
+${heal.llm.summary}
+
+<details>
+<summary>Verified Git Diff</summary>
+
+\`\`\`diff
+${heal.gitDiff.slice(0, 6000)}
+\`\`\`
+
+</details>
+`;
+    const pr = await openVerifiedPullRequest({
+      owner: heal.owner,
+      repo: heal.repo,
+      runId,
+      branchName,
+      files: heal.committedFiles,
+      unifiedDiff: heal.gitDiff,
+      prTitle: `fix(security): PatchGuard verified hardening (${heal.touchedFiles.join(', ')})`,
+      prBodyMarkdown: body,
+      zeroSecretAudit: auditZeroSecrets(),
+    });
+    state.latestPr = pr;
+    emitLog('success', `Opened real PR #${pr.prNumber} on ${heal.fullName}: ${pr.prUrl}`);
+    res.json(pr);
+  } catch (err) {
+    emitLog('warn', `Real repo PR failed: ${err.message}`);
     res.status(400).json({ ok: false, error: err.message });
   }
 });

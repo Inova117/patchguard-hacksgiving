@@ -75,15 +75,15 @@
 
       <section class="card">
         <div class="tabs" id="tabsBar">
-          <button class="tab active" data-tab="diff">Code Diff</button>
+          <button class="tab active" data-tab="repo">Real GitHub Repo</button>
+          <button class="tab" data-tab="diff">Code Diff</button>
           <button class="tab" data-tab="checkpoints">Sprite Checkpoints</button>
           <button class="tab" data-tab="vault">Zero-Secret Vault</button>
           <button class="tab" data-tab="store">Live Storefront</button>
           <button class="tab" data-tab="logs">Live SSE Log</button>
-          <button class="tab" data-tab="repo">Custom Repo Audit</button>
         </div>
 
-        <div class="tab-panel active" id="tab-diff">
+        <div class="tab-panel" id="tab-diff">
           <div class="panel-actions">
             <span class="muted" id="patchMeta">Run the self-heal loop or apply patch to view diff.</span>
             <button class="btn sm" id="applyPatchBtn">Apply Patch Only</button>
@@ -125,12 +125,24 @@
           <div class="terminal" id="sseTerminal"></div>
         </div>
 
-        <div class="tab-panel" id="tab-repo">
+        <div class="tab-panel active" id="tab-repo">
           <div class="panel-actions">
-            <input id="repoUrlInput" placeholder="https://github.com/owner/public-repo" style="flex:1;" />
-            <button class="btn sm primary" id="auditRepoBtn">Audit Public Repo</button>
+            <input id="repoUrlInput" value="https://github.com/Inova117/indumatic-demo" placeholder="https://github.com/owner/repo" style="flex:1;" />
+            <button class="btn sm primary" id="auditRepoBtn">1. Audit Real Repo</button>
+            <button class="btn sm" id="healRepoBtn">2. AI Self-Heal (Zero-Secret LLM)</button>
+            <button class="btn sm" id="prRepoBtn">3. Open GitHub PR</button>
           </div>
-          <pre class="diff-view" id="repoAuditResult">Enter any public Node/JS GitHub URL to shallow-clone into an isolated /tmp sandbox inside the Sprite and audit static security hygiene.</pre>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
+            <span class="muted">Real repos:</span>
+            <button class="btn sm repo-preset" data-url="https://github.com/Inova117/indumatic-demo">indumatic-demo (Vite)</button>
+            <button class="btn sm repo-preset" data-url="https://github.com/Inova117/zerioncrm">zerioncrm (Vite+Vitest)</button>
+            <button class="btn sm repo-preset" data-url="https://github.com/Inova117/Trivento">Trivento (TanStack)</button>
+          </div>
+          <div id="repoVisualSummary" class="vault-box" style="margin-bottom:10px;">
+            <span class="muted">Paste any real GitHub repo → PatchGuard clones it inside the Fly Sprite, runs <code>npm install</code>, <code>npm audit</code> (real CVEs), static scan, build/tests, boots the app in live Chromium, patches it via Zero-Secret LLM, re-verifies, and opens a GitHub PR.</span>
+          </div>
+          <div id="repoShots" class="hero-compare"></div>
+          <pre class="diff-view" id="repoAuditResult" style="max-height:280px;">Ready to audit a real GitHub repository.</pre>
         </div>
       </section>
     </main>

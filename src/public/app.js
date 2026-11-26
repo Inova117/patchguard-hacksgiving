@@ -498,18 +498,99 @@ document.getElementById('openPrBtn').addEventListener('click', async () => {
 document.getElementById('reloadStoreBtn').addEventListener('click', () => {
   document.getElementById('storeFrame').src = `/pixelmart/?t=${Date.now()}`;
 });
+document.querySelectorAll('.repo-preset').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.getElementById('repoUrlInput').value = btn.dataset.url;
+  });
+});
+
+function renderRepoSummary(audit, heal) {
+  const box = document.getElementById('repoVisualSummary');
+  const shots = document.getElementById('repoShots');
+  shots.innerHTML = '';
+
+  if (heal) {
+    const bHdr = heal.before?.missingHeaders?.length ?? 0;
+    const aHdr = heal.after?.missingHeaders?.length ?? 0;
+    box.innerHTML = `
+      <div><strong>Self-Healed Real Repo:</strong> ${escapeHtml(heal.fullName)} (${escapeHtml(heal.framework)})</div>
+      <div><strong>Zero-Secret LLM:</strong> <code>${escapeHtml(heal.llm.source)}</code> · <code>${escapeHtml(heal.llm.model)}</code> (${heal.llm.latencyMs}ms)</div>
+      <div><strong>Live Missing Security Headers:</strong> <span class="b b-fail">${bHdr} missing</span> → <span class="b ${aHdr === 0 ? 'b-pass' : 'b-fail'}">${aHdr} missing</span> · <strong>Build:</strong> ${heal.after.buildAndTest?.build ? (heal.after.buildAndTest.build.ok ? '✅ PASS' : '❌ FAIL') : 'N/A'}</div>
+      <div class="muted">${escapeHtml(heal.llm.summary)}</div>
+    `;
+    if (heal.before?.screenshotUrl) {
+      shots.innerHTML += `<div class="hero-pane before"><div class="hero-lbl"><span>BEFORE · ${escapeHtml(heal.repo)}</span><span class="b b-fail">${bHdr} headers missing</span></div><img src="${heal.before.screenshotUrl}?t=${Date.now()}" /></div>`;
+    }
+    if (heal.after?.screenshotUrl) {
+      shots.innerHTML += `<div class="hero-pane after"><div class="hero-lbl"><span>AFTER · ${escapeHtml(heal.repo)}</span><span class="b ${aHdr === 0 ? 'b-pass' : 'b-fail'}">${aHdr === 0 ? 'HARDENED' : aHdr + ' missing'}</span></div><img src="${heal.after.screenshotUrl}?t=${Date.now()}" /></div>`;
+    }
+    return;
+  }
+
+  if (audit) {
+    const lb = audit.liveBrowser || {};
+    box.innerHTML = `
+      <div><strong>Audited Real Repo:</strong> ${escapeHtml(audit.fullName)} (${escapeHtml(audit.framework)}) · ${audit.filesScanned} files scanned</div>
+      <div><strong>Real CVEs (npm audit):</strong> ${audit.cveAudit?.total ?? 0} (critical=${audit.cveAudit?.severities?.critical ?? 0}, high=${audit.cveAudit?.severities?.high ?? 0}) · <strong>Static findings:</strong> ${audit.staticFindingsCount}</div>
+      <div><strong>Live Chromium Boot:</strong> ${lb.ran ? `HTTP ${lb.httpStatus} · "${escapeHtml(lb.pageTitle)}" · Missing headers: ${lb.missingHeaders?.length ?? 0} · Console errors: ${lb.consoleErrors?.length ?? 0}` : escapeHtml(lb.reason || 'Not booted')}</div>
+    `;
+    if (lb.screenshotUrl) {
+      shots.innerHTML = `<div class="hero-pane before" style="grid-column:span 2;"><div class="hero-lbl"><span>LIVE CHROMIUM · ${escapeHtml(audit.fullName)}</span><span class="b ${lb.headersPassed ? 'b-pass' : 'b-fail'}">${lb.headersPassed ? 'HEADERS OK' : (lb.missingHeaders?.length || 0) + ' HEADERS MISSING'}</span></div><img src="${lb.screenshotUrl}?t=${Date.now()}" /></div>`;
+    }
+  }
+}
+
 document.getElementById('auditRepoBtn').addEventListener('click', async () => {
   const repoUrl = document.getElementById('repoUrlInput').value.trim();
   const out = document.getElementById('repoAuditResult');
-  out.textContent = 'Shallow cloning into isolated /tmp sandbox...';
+  out.textContent = `Cloning ${repoUrl}, installing deps, running npm audit + build + live Chromium...`;
   try {
     const res = await api('/api/repo/audit', {
       method: 'POST',
       body: JSON.stringify({ repoUrl }),
     });
-    out.textContent = JSON.stringify(res, null, 2);
+    renderRepoSummary(res, null);
+    out.textContent = JSON.stringify(
+      {
+        fullName: res.fullName,
+        framework: res.framework,
+        cveAudit: res.cveAudit,
+        buildAndTest: res.buildAndTest,
+        actionableFindings: res.actionableFindings,
+        liveBrowser: res.liveBrowser,
+      },
+      null,
+      2
+    );
   } catch (err) {
     out.textContent = `Audit error: ${err.message}`;
+  }
+});
+
+document.getElementById('healRepoBtn').addEventListener('click', async () => {
+  const repoUrl = document.getElementById('repoUrlInput').value.trim();
+  const out = document.getElementById('repoAuditResult');
+  out.textContent = `Calling Fly Zero-Secret LLM Connector to patch ${repoUrl}, rebuilding, and re-verifying in Chromium...`;
+  try {
+    const res = await api('/api/repo/heal', {
+      method: 'POST',
+      body: JSON.stringify({ repoUrl }),
+    });
+    renderRepoSummary(null, res);
+    out.textContent = res.gitDiff || JSON.stringify(res, null, 2);
+  } catch (err) {
+    out.textContent = `Self-Heal error: ${err.message}`;
+  }
+});
+
+document.getElementById('prRepoBtn').addEventListener('click', async () => {
+  const out = document.getElementById('repoAuditResult');
+  try {
+    const pr = await api('/api/repo/pr', { method: 'POST', body: '{}' });
+    out.textContent = `✅ Real Pull Request opened via Fly Zero-Secret GitHub Connector:\n${pr.prUrl}\n\nBranch: ${pr.branchName}`;
+    await refreshState();
+  } catch (err) {
+    out.textContent = `PR error: ${err.message}`;
   }
 });
 
