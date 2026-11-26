@@ -296,8 +296,9 @@ async function hydrateBeforeState(runId, beforeReport, restoreMs, screenshots) {
   });
 }
 
-async function waitForSpriteReconnect(startedAtMs) {
+async function waitForSpriteReconnect(startedAtMs, previousBootId = null) {
   const metricEl = document.getElementById('restoreMetric');
+  await new Promise((r) => setTimeout(r, 450));
   while (true) {
     const elapsed = Date.now() - startedAtMs;
     setStep(3, 'active', `Restoring CoW... ${elapsed} ms`);
@@ -306,13 +307,16 @@ async function waitForSpriteReconnect(startedAtMs) {
       const res = await fetch('/api/health', { cache: 'no-store' });
       if (res.ok) {
         const health = await res.json();
-        const totalMs = Date.now() - startedAtMs;
-        metricEl.textContent = `${totalMs} ms`;
-        setStep(3, 'done', `${totalMs} ms (CoW)`);
-        return { totalMs, health };
+        const bootChanged = !previousBootId || (health.bootId && health.bootId !== previousBootId);
+        if (bootChanged && health.storeHealthy) {
+          const totalMs = Date.now() - startedAtMs;
+          metricEl.textContent = `${totalMs} ms`;
+          setStep(3, 'done', `${totalMs} ms (CoW)`);
+          return { totalMs, health };
+        }
       }
     } catch {}
-    await new Promise((r) => setTimeout(r, 150));
+    await new Promise((r) => setTimeout(r, 200));
   }
 }
 
@@ -412,7 +416,7 @@ async function runFullAutonomousLoop() {
           })
         );
       } catch {}
-      const { totalMs } = await waitForSpriteReconnect(tRestore);
+      const { totalMs } = await waitForSpriteReconnect(tRestore, restoreRes.previousBootId);
       sessionStorage.removeItem('patchguard_resume');
       await hydrateBeforeState(runId, beforeRes.report, totalMs, screenshotsBase64);
     } else {
@@ -436,7 +440,7 @@ async function triggerRestore(checkpointId) {
     body: JSON.stringify({ checkpointId }),
   });
   if (res.restoring) {
-    await waitForSpriteReconnect(t0);
+    await waitForSpriteReconnect(t0, res.previousBootId);
   }
   await refreshState();
 }

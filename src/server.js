@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import express from 'express';
 import fs from 'node:fs';
@@ -34,6 +35,7 @@ import {
 } from './sprite-runtime.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const BOOT_ID = crypto.randomUUID();
 const app = express();
 app.use(express.json({ limit: '5mb' }));
 
@@ -231,6 +233,7 @@ app.get('/api/health', async (_req, res) => {
   } catch {}
   res.json({
     ok: true,
+    bootId: BOOT_ID,
     runtime: getRuntimeInfo(),
     storeHealthy: Boolean(storeHealth?.ok),
     storeUrl: STORE_URL,
@@ -320,7 +323,7 @@ app.post('/api/checkpoints/restore', async (req, res) => {
     } else {
       emitLog('warn', `Fly Sprite CoW restore initiated for ${targetId}; awaiting VM reconnect`);
     }
-    res.json({ ok: true, ...result });
+    res.json({ ok: true, previousBootId: BOOT_ID, ...result });
   } catch (err) {
     emitLog('error', `Checkpoint restore failed: ${err.message}`);
     res.status(500).json({ ok: false, error: err.message });

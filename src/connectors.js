@@ -284,7 +284,7 @@ export async function callLlmJsonViaConnector(prompt, { maxTokens = 2800, timeou
           model,
           temperature: 0,
           max_tokens: maxTokens,
-          reasoning: { effort: 'none' },
+          ...(model.includes('nemotron') ? { reasoning: { effort: 'none' } } : {}),
           messages: [{ role: 'user', content: prompt }],
         };
 
